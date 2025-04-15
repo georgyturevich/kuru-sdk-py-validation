@@ -1,0 +1,18 @@
+# Environments
+.env
+.venv
+venv/
+
+# VSCode settings
+.vscode/
+
+# IDE - JetBrains
+.idea/
+
+__pycache__/
+
+# Pytest
+.pytest_cache/
+
+# Pytest - Coverage
+.coverage/
