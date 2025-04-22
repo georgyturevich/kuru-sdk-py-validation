@@ -18,10 +18,11 @@ async def test_example_place_order():
         private_key=os.getenv("PRIVATE_KEY"),
     )
 
+    print("\n")
     print(f"Wallet address: {client.wallet_address}")
 
     balance = web3.eth.get_balance(client.wallet_address)
-    print(f"Current balance: {web3.from_wei(balance, 'ether')} MON")
+    print(f"Wallet balance: {web3.from_wei(balance, 'ether')} MON")
 
     order = OrderRequest(
         market_address=market_address,
