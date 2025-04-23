@@ -90,6 +90,7 @@ class WsOrderController:
 
 
     def on_order_cancelled(self, payload: OrderCancelledPayload):
+        cloid = 0
         print(f"Order cancelled: {payload}")
         for order_id in payload.order_ids:
             cloid = self.client.order_id_to_cloid[order_id]

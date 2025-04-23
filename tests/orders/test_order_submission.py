@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 import pytest
+from eth_utils.curried import to_wei
+from kuru_sdk import MarginAccount
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderRequest
 from web3 import Web3
@@ -18,18 +20,34 @@ async def test_example_place_order():
         private_key=os.getenv("PRIVATE_KEY"),
     )
 
+
+
+
     print("\n")
     print(f"Wallet address: {client.wallet_address}")
 
     balance = web3.eth.get_balance(client.wallet_address)
     print(f"Wallet balance: {web3.from_wei(balance, 'ether')} MON")
 
+    price = "0.00000284"
+    size = "10000"
+
+    margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
+    size_mon = float(price) * float(size)
+    # TODO: it should be rounded up/down according to tick sizej/precesion
+    size_wei = to_wei(size_mon, "ether")
+    margin_account_deposit_tx_hash = await margin_account.deposit(margin_account.NATIVE, size_wei)
+    print(f"Deposit transaction hash: {margin_account_deposit_tx_hash}")
+
+    assert margin_account_deposit_tx_hash is not None
+    assert len(margin_account_deposit_tx_hash) > 0
+
     order = OrderRequest(
         market_address=market_address,
         order_type='limit',
         side='buy',
-        price="0.00000284",
-        size="10000",
+        price=price,
+        size=size,
         post_only=False,
         cloid="mm_1"
     )
