@@ -21,7 +21,7 @@ def market_params():
 
 # kuru_sdk.orderbook.Orderbook.prepare_market_buy normalizing
 # kuru_sdk.orderbook.Orderbook.prepare_market_sell normalizing
-def test_size_to_value_conversion(market_params):
+def test_size_to_value_conversion(market_params: MarketParams):
     size = "1.23"
 
     expected = int(float(size) * float(str(10 ** market_params.base_asset_decimals)))
@@ -29,14 +29,14 @@ def test_size_to_value_conversion(market_params):
 
 
 # kuru_sdk.orderbook.Orderbook.normalize_with_precision
-def test_price_precision_normalization(market_params):
+def test_price_precision_normalization(market_params: MarketParams):
     price = "0.456"
 
     expected = int(float(price) * float(str(market_params.price_precision)))
     assert expected == 456000000
 
 # kuru_sdk.orderbook.Orderbook.prepare_buy_order round_up
-def test_tick_round_up(market_params):
+def test_tick_round_up(market_params: MarketParams):
     price = "2.003000007"
     price_normalized = int(float(price) * float(str(market_params.price_precision)))
     price_mod = price_normalized % market_params.tick_size
@@ -48,7 +48,7 @@ def test_tick_round_up(market_params):
 
 
 # kuru_sdk.orderbook.Orderbook.prepare_buy_order round_down|default
-def test_tick_round_down(market_params):
+def test_tick_round_down(market_params: MarketParams):
     price = "2.003000007"
 
     price_normalized = int(float(price) * float(str(market_params.price_precision)))
@@ -60,14 +60,14 @@ def test_tick_round_down(market_params):
 
 
 # kuru_sdk.orderbook.Orderbook.prepare_buy_order
-def test_tick_normalization_round_up_with_ceil(market_params):
+def test_tick_normalization_round_up_with_ceil(market_params: MarketParams):
     # Use ceil to round up to the nearest tick
     normalized_price = 2002999998
     result = market_params.tick_size * math.ceil(float(normalized_price) / market_params.tick_size)
     assert result == 2003000000
 
 # kuru_sdk.orderbook.Orderbook.prepare_buy_order
-def test_tick_normalization_round_down_with_floor(market_params):
+def test_tick_normalization_round_down_with_floor(market_params: MarketParams):
     # Use floor to round down to the nearest tick
     normalized_price = 2003000003
     result = market_params.tick_size * math.floor(float(normalized_price) / market_params.tick_size)

@@ -1,8 +1,10 @@
 import os
 
+import math
 from dotenv import load_dotenv
 import pytest
-from eth_utils.curried import to_wei
+from eth_typing import HexStr
+from eth_utils.currency import from_wei, to_wei
 from kuru_sdk import MarginAccount
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderRequest
@@ -13,6 +15,15 @@ async def test_example_place_order():
     load_dotenv()
 
     web3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL")))
+        
+    price = "0.00000284"
+    size = "10000"
+
+    await add_margin_balance(web3, price, size)
+    
+    await create_limit_by_order(web3, price, size)
+
+async def create_limit_by_order(web3, price, size):
     market_address = "0x05e6f736b5dedd60693fa806ce353156a1b73cf3" #// CHOG-MON https://www.kuru.io/trade/0x05e6f736b5dedd60693fa806ce353156a1b73cf3
     client = ClientOrderExecutor(
         web3=web3,
@@ -20,27 +31,11 @@ async def test_example_place_order():
         private_key=os.getenv("PRIVATE_KEY"),
     )
 
-
-
-
     print("\n")
     print(f"Wallet address: {client.wallet_address}")
 
     balance = web3.eth.get_balance(client.wallet_address)
     print(f"Wallet balance: {web3.from_wei(balance, 'ether')} MON")
-
-    price = "0.00000284"
-    size = "10000"
-
-    margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
-    size_mon = float(price) * float(size)
-    # TODO: it should be rounded up/down according to tick sizej/precesion
-    size_wei = to_wei(size_mon, "ether")
-    margin_account_deposit_tx_hash = await margin_account.deposit(margin_account.NATIVE, size_wei)
-    print(f"Deposit transaction hash: {margin_account_deposit_tx_hash}")
-
-    assert margin_account_deposit_tx_hash is not None
-    assert len(margin_account_deposit_tx_hash) > 0
 
     order = OrderRequest(
         market_address=market_address,
@@ -56,3 +51,44 @@ async def test_example_place_order():
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
+
+async def add_margin_balance(web3, price, size):
+    margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
+    
+    size_mon = float(price) * float(size)
+    size_wei = to_wei(size_mon, "ether")
+    size_wei = 10 * math.ceil(float(size_wei) / 10)
+
+    margin_account_deposit_tx_hash = await margin_account.deposit(margin_account.NATIVE, size_wei)
+    print(f"Deposit transaction hash: {margin_account_deposit_tx_hash}")
+
+    assert margin_account_deposit_tx_hash is not None
+    assert len(margin_account_deposit_tx_hash) > 0
+
+    # Wait for the deposit transaction to be confirmed
+    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(margin_account_deposit_tx_hash))
+    print(f"Deposit transaction confirmed in block {tx_receipt['blockNumber']}")
+    assert tx_receipt['status'] == 1, "Deposit transaction failed"
+
+@pytest.mark.asyncio
+async def test_clear_margin_account_balance():
+    load_dotenv()
+
+    web3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL")))
+    margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
+
+    # Clear the margin account balance
+    balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
+    print(f"Clearing margin account balance: {from_wei(balance, "ether")} MON")
+    if balance > 0:
+        tx_hash = await margin_account.withdraw(margin_account.NATIVE, balance)
+        print(f"Withdraw transaction hash: {tx_hash}")
+        assert tx_hash is not None
+        assert len(tx_hash) > 0
+
+        receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
+        assert receipt["status"] == 1
+
+        balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
+        print(f"New margin account balance: {from_wei(balance, "ether")} MON")
+        assert balance == 0
