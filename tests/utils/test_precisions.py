@@ -1,5 +1,6 @@
 import pytest
 from kuru_sdk.types import MarketParams
+import math
 
 @pytest.fixture
 def market_params():
@@ -18,34 +19,38 @@ def market_params():
         maker_fee_bps=10,
     )
 
-
+# kuru_sdk.orderbook.Orderbook.prepare_market_buy normalizing
+# kuru_sdk.orderbook.Orderbook.prepare_market_sell normalizing
 def test_size_to_value_conversion(market_params):
     size = "1.23"
-    # value = int(float(size) * float(str(10 ** base_asset_decimals)))
+
     expected = int(float(size) * float(str(10 ** market_params.base_asset_decimals)))
     assert expected == 1230000000000000000
 
 
+# kuru_sdk.orderbook.Orderbook.normalize_with_precision
 def test_price_precision_normalization(market_params):
     price = "0.456"
-    # price_normalized = int(float(price) * float(str(price_precision)))
+
     expected = int(float(price) * float(str(market_params.price_precision)))
     assert expected == 456000000
 
-
+# kuru_sdk.orderbook.Orderbook.prepare_buy_order round_up
 def test_tick_round_up(market_params):
-    price = "2.003"
+    price = "2.003000007"
     price_normalized = int(float(price) * float(str(market_params.price_precision)))
     price_mod = price_normalized % market_params.tick_size
     # round up to the nearest tick
     if price_mod > 0:
         price_normalized = price_normalized + (market_params.tick_size - price_mod)
     # initial: 2.003 * 1000 = 2003 -> mod=3 -> +2 => 2005
-    assert price_normalized == 2003000000
+    assert price_normalized == 2003000010
 
 
+# kuru_sdk.orderbook.Orderbook.prepare_buy_order round_down|default
 def test_tick_round_down(market_params):
-    price = "2.003"
+    price = "2.003000007"
+
     price_normalized = int(float(price) * float(str(market_params.price_precision)))
     price_mod = price_normalized % market_params.tick_size
     # round down to the nearest tick
@@ -54,10 +59,16 @@ def test_tick_round_down(market_params):
     assert price_normalized == 2003000000
 
 
-def test_tick_no_normalization_clipping(market_params):
-    price = "2.003"
-    price_normalized = int(float(price) * float(str(market_params.price_precision)))
-    price_mod = price_normalized % market_params.tick_size
-    # no normalization, clip if not divisible by tick size
-    price_normalized = price_normalized - price_mod
-    assert price_normalized == 2003000000 
+# kuru_sdk.orderbook.Orderbook.prepare_buy_order
+def test_tick_normalization_round_up_with_ceil(market_params):
+    # Use ceil to round up to the nearest tick
+    normalized_price = 2002999998
+    result = market_params.tick_size * math.ceil(float(normalized_price) / market_params.tick_size)
+    assert result == 2003000000
+
+# kuru_sdk.orderbook.Orderbook.prepare_buy_order
+def test_tick_normalization_round_down_with_floor(market_params):
+    # Use floor to round down to the nearest tick
+    normalized_price = 2003000003
+    result = market_params.tick_size * math.floor(float(normalized_price) / market_params.tick_size)
+    assert result == 2003000000 
