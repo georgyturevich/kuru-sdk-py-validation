@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 import math
 from dotenv import load_dotenv
@@ -15,15 +16,26 @@ async def test_example_place_order():
     load_dotenv()
 
     web3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL")))
-        
+
     price = "0.00000284"
     size = "10000"
 
-    await add_margin_balance(web3, price, size)
-    
-    await create_limit_by_order(web3, price, size)
+    num_orders = 20
+    await add_margin_balance(web3, price, size, num_orders)
 
-async def create_limit_by_order(web3, price, size):
+    # Create a list of coroutines to run in parallel
+    tasks = []
+    for i in range(num_orders):
+        cloid = f"mm_{i+1}"
+        tasks.append(create_limit_by_order(web3, price, size, cloid))
+
+    # Run all tasks in parallel
+    print(f"\nRunning {num_orders} orders in parallel...")
+    await asyncio.gather(*tasks)
+
+    print(f"\nAll {num_orders} orders have been placed successfully.")
+
+async def create_limit_by_order(web3, price, size, cloid="mm_1"):
     market_address = "0x05e6f736b5dedd60693fa806ce353156a1b73cf3" #// CHOG-MON https://www.kuru.io/trade/0x05e6f736b5dedd60693fa806ce353156a1b73cf3
     client = ClientOrderExecutor(
         web3=web3,
@@ -31,7 +43,7 @@ async def create_limit_by_order(web3, price, size):
         private_key=os.getenv("PRIVATE_KEY"),
     )
 
-    print("\n")
+    print(f"\nOrder {cloid}:")
     print(f"Wallet address: {client.wallet_address}")
 
     balance = web3.eth.get_balance(client.wallet_address)
@@ -44,18 +56,18 @@ async def create_limit_by_order(web3, price, size):
         price=price,
         size=size,
         post_only=False,
-        cloid="mm_1"
+        cloid=cloid
     )
-    print(f"Placing limit buy order: {order.size} units at {order.price}")
+    print(f"Placing limit buy order: {order.size} units at {order.price} with cloid {cloid}")
     tx_hash = await client.place_order(order)
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
 
-async def add_margin_balance(web3, price, size):
+async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int):
     margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
-    
-    size_mon = float(price) * float(size)
+
+    size_mon = float(price) * float(size) * num_orders # make deposit for num_orders orders
     size_wei = to_wei(size_mon, "ether")
     size_wei = 10 * math.ceil(float(size_wei) / 10)
 
