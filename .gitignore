@@ -5,9 +5,13 @@ venv/
 
 # VSCode settings
 .vscode/
+.cursor/
 
 # IDE - JetBrains
 .idea/
+.run/
+.junie/
+
 
 __pycache__/
 
@@ -16,3 +20,4 @@ __pycache__/
 
 # Pytest - Coverage
 .coverage/
+
