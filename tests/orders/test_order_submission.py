@@ -41,7 +41,7 @@ async def test_example_place_order():
     print(f"\nRunning {num_orders} orders in parallel using ThreadPoolExecutor...")
     futures = {}
     web3_provider_url = os.getenv("RPC_URL")
-    succes_count = 0
+    success_count = 0
     fail_count = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_orders) as executor:
         for i in range(num_orders):
@@ -55,13 +55,13 @@ async def test_example_place_order():
             # Get the result (or exception)
             try:
                 future.result()
-                succes_count += 1
+                success_count += 1
                 print(f"Order execution for cloid {cloid} completed successfully.")
             except Exception as exc:
                 fail_count += 1
                 print(f"Order execution for cloid {cloid} generated an exception: {exc}")
 
-    print(f"\n{succes_count} orders have been placed successfully. {fail_count} orders have failed.")
+    print(f"\n{success_count} orders have been placed successfully. {fail_count} orders have failed.")
 
 async def create_limit_buy_order(web3, price, size, cloid="mm_1"):
     market_address = "0x05e6f736b5dedd60693fa806ce353156a1b73cf3" #// CHOG-MON https://www.kuru.io/trade/0x05e6f736b5dedd60693fa806ce353156a1b73cf3
