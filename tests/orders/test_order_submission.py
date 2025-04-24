@@ -1,6 +1,6 @@
 import os
 import asyncio
-
+import concurrent.futures
 import math
 from dotenv import load_dotenv
 import pytest
@@ -23,19 +23,47 @@ async def test_example_place_order():
     num_orders = 20
     await add_margin_balance(web3, price, size, num_orders)
 
-    # Create a list of coroutines to run in parallel
-    tasks = []
-    for i in range(num_orders):
-        cloid = f"mm_{i+1}"
-        tasks.append(create_limit_by_order(web3, price, size, cloid))
+    # Define a wrapper function to run async function in executor
+    def run_order_in_thread(web3_provider_url, price, size, cloid):
+        # Create a new Web3 instance for each thread to avoid potential thread-safety issues
+        thread_web3 = Web3(Web3.HTTPProvider(web3_provider_url))
 
-    # Run all tasks in parallel
-    print(f"\nRunning {num_orders} orders in parallel...")
-    await asyncio.gather(*tasks)
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Run the async function in this thread's event loop
+            return loop.run_until_complete(create_limit_buy_order(thread_web3, price, size, cloid))
+        finally:
+            loop.close()
 
-    print(f"\nAll {num_orders} orders have been placed successfully.")
+    # Run all tasks in parallel using ThreadPoolExecutor
+    print(f"\nRunning {num_orders} orders in parallel using ThreadPoolExecutor...")
+    futures = {}
+    web3_provider_url = os.getenv("RPC_URL")
+    succes_count = 0
+    fail_count = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_orders) as executor:
+        for i in range(num_orders):
+            cloid = f"mm_{i+1}"
+            future = executor.submit(run_order_in_thread, web3_provider_url, price, size, cloid)
+            futures[future] = cloid
 
-async def create_limit_by_order(web3, price, size, cloid="mm_1"):
+        # Wait for all futures to complete
+        for future in concurrent.futures.as_completed(futures.keys()):
+            cloid = futures[future]
+            # Get the result (or exception)
+            try:
+                future.result()
+                succes_count += 1
+                print(f"Order execution for cloid {cloid} completed successfully.")
+            except Exception as exc:
+                fail_count += 1
+                print(f"Order execution for cloid {cloid} generated an exception: {exc}")
+
+    print(f"\n{succes_count} orders have been placed successfully. {fail_count} orders have failed.")
+
+async def create_limit_buy_order(web3, price, size, cloid="mm_1"):
     market_address = "0x05e6f736b5dedd60693fa806ce353156a1b73cf3" #// CHOG-MON https://www.kuru.io/trade/0x05e6f736b5dedd60693fa806ce353156a1b73cf3
     client = ClientOrderExecutor(
         web3=web3,
@@ -64,6 +92,10 @@ async def create_limit_by_order(web3, price, size, cloid="mm_1"):
     assert tx_hash is not None
     assert len(tx_hash) > 0
 
+    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
+    assert tx_receipt['status'] == 1, "Order placement failed"
+    print(f"Order '{cloid}' placed successfully. Block number: {tx_receipt['blockNumber']}")
+
 async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int):
     margin_account = MarginAccount(web3=web3, contract_address="0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef", private_key=os.getenv("PRIVATE_KEY"))
 
@@ -79,8 +111,8 @@ async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int)
 
     # Wait for the deposit transaction to be confirmed
     tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(margin_account_deposit_tx_hash))
-    print(f"Deposit transaction confirmed in block {tx_receipt['blockNumber']}")
     assert tx_receipt['status'] == 1, "Deposit transaction failed"
+    print(f"Deposit transaction confirmed in block {tx_receipt['blockNumber']}")
 
 @pytest.mark.asyncio
 async def test_clear_margin_account_balance():
