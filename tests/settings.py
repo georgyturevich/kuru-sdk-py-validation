@@ -9,15 +9,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(yaml_file=CONFIG_YAML_PATH, case_sensitive=False, extra="ignore")
 
     """Holds required environment settings for the tests."""
-    rpc_url: str = Field(required=True)
-    websocket_url: str = Field(required=True)
-    private_key: str = Field(required=True)
-    user_address: str = Field(required=True)
-    quicknode_hash: str = Field(required=False)
+    rpc_url: str = Field(default=...)
+    websocket_url: str = Field(default=...)
+    private_key: str = Field(default=...)
+    user_address: str = Field(default=...)
+    quicknode_hash: str | None = Field(default=None)
 
     def full_rpc_url(self):
         """Returns the full RPC URL with the private key."""
-        if self.rpc_url.find("quiknode.pro") != -1:
+        if self.rpc_url.find("quiknode.pro") != -1 and self.quicknode_hash:
             return f"{self.rpc_url}/{self.quicknode_hash}/"
 
         return self.rpc_url
