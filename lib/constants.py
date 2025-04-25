@@ -21,3 +21,11 @@ testnet_market_addresses: MarketAddresses = {
     "YAKI_MON": "0xd5c1dc181c359f0199c83045a85cd2556b325de0",
     "KB_MON": "0x37676650654c9c2c36fcecfaea6172ee1849f9a4",
 }
+
+class KuruContractAddresses(TypedDict):
+    margin_account: str
+    
+
+testnet_kuru_contract_addresses: KuruContractAddresses = {
+    "margin_account": "0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef",
+}
