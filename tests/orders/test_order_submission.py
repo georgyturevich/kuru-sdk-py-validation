@@ -1,10 +1,6 @@
 import os
-import asyncio
-import concurrent.futures
 import math
-import time
 
-from Crypto.Util import number
 from dotenv import load_dotenv
 import pytest
 from eth_typing import HexStr
@@ -12,7 +8,6 @@ from eth_utils.currency import from_wei, to_wei
 from kuru_sdk import MarginAccount, TxOptions
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderRequest
-from pyrate_limiter import Duration, Rate, Limiter
 from web3 import Web3
 from tests.utils.parallel import run_tasks_in_parallel
 
