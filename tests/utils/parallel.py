@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from pyrate_limiter import Duration, Rate, Limiter
@@ -65,14 +66,18 @@ def run_tasks_in_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers or rate_limit) as executor:
         futures = {
-            executor.submit(_wrapper, args_list[i], kwargs_list[i]): i
-            for i in range(total)
+            executor.submit(_wrapper, args_list[i], kwargs_list[i]): i for i in range(total)
         }
         for fut in as_completed(futures):
             try:
                 fut.result()
                 success += 1
-            except Exception:
+            except Exception as e:
+                # print exception information
+                print(f"Exception in task {futures[fut]}: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+
                 failure += 1
 
     return success, failure 
