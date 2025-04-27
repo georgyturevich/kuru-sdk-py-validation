@@ -14,7 +14,7 @@ def run_tasks_in_parallel(
     max_delay: Union[int, Duration] = 2 * Duration.SECOND,
     max_workers: Optional[int] = None,
     raise_when_fail: bool = False,
-) -> Tuple[int, int]:
+) -> Tuple[int, int, Dict[str, float]]:
     """
     Run `fn` in parallel across a thread pool with token-bucket rate limiting.
 
@@ -29,7 +29,7 @@ def run_tasks_in_parallel(
         raise_when_fail: if True, limiter.try_acquire raises on failure
 
     Returns:
-        success_count, failure_count
+        success_count, failure_count, time_stats_dict
     """
     rate = Rate(limit=rate_limit, interval=interval)
     limiter = Limiter(rate, raise_when_fail=raise_when_fail, max_delay=max_delay)
@@ -51,6 +51,7 @@ def run_tasks_in_parallel(
         kwargs_list *= total
 
     success = failure = 0
+    time_stats = {}  # Dictionary to store timing statistics
 
     def _wrapper(args: Tuple[Any, ...], kwargs: Dict[str, Any]):
         limiter.try_acquire("parallel_task")
@@ -70,7 +71,10 @@ def run_tasks_in_parallel(
         }
         for fut in as_completed(futures):
             try:
-                fut.result()
+                result = fut.result()
+                # Check if result is a dict with timing information
+                if isinstance(result, dict) and 'cloid' in result and 'duration' in result:
+                    time_stats[result['cloid']] = result['duration']
                 success += 1
             except Exception as e:
                 # print exception information
@@ -80,4 +84,4 @@ def run_tasks_in_parallel(
 
                 failure += 1
 
-    return success, failure 
+    return success, failure, time_stats 
