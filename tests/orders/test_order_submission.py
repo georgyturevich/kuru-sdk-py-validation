@@ -3,7 +3,7 @@ import math
 import signal
 import time
 import statistics
-from typing import Optional
+from typing import Optional, Dict
 
 from dotenv import load_dotenv
 import pytest
@@ -43,10 +43,8 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 1  # Increased from 1 to get more meaningful statistics
+    num_orders = 20  # Increased from 1 to get more meaningful statistics
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
-
-
 
     # Build list of kwargs for each order
     base_nonce = web3.eth.get_transaction_count(web3.eth.account.from_key(settings.private_key).address)
@@ -59,6 +57,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
             "cloid": f"mm_{i+1}",
             "nonce": base_nonce + i,
             "private_key": settings.private_key,
+            "ws_order_tester": ws_order_tester,  # Pass the WebSocket tester to track submission times
         })
 
     # Track total time for all orders
@@ -77,7 +76,28 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     print(f"\n{success_count} orders have been placed successfully. {fail_count} orders have failed.")
     print(f"Total time for all orders: {total_duration:.2f} seconds")
     
-    await asyncio.sleep(5)
+    # Wait for all WebSocket events to be received (with a timeout)
+    print("\nWaiting for WebSocket events to be received...")
+    try:
+        await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
+        print(f"All {ws_order_tester.received_events} WebSocket events received.")
+    except asyncio.TimeoutError:
+        print(f"Timeout waiting for WebSocket events. Received {ws_order_tester.received_events} of {ws_order_tester.expected_events} expected events.")
+    
+    # Print WebSocket delay statistics
+    ws_stats = ws_order_tester.get_delay_statistics()
+    if ws_stats:
+        print("\n--- WebSocket Event Delay Statistics ---")
+        print(f"Number of events: {ws_stats['count']}")
+        print(f"Minimum delay: {ws_stats['min']:.4f} seconds")
+        print(f"Maximum delay: {ws_stats['max']:.4f} seconds")
+        print(f"Mean delay: {ws_stats['mean']:.4f} seconds")
+        print(f"Median delay: {ws_stats['median']:.4f} seconds")
+        if 'std_dev' in ws_stats:
+            print(f"Standard deviation: {ws_stats['std_dev']:.4f} seconds")
+    else:
+        print("\nNo WebSocket event delay statistics available.")
+    
     await ws_order_tester.shutdown(signal.SIGINT)
     
     # Print detailed time statistics for individual orders
@@ -108,7 +128,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
                 
             print(f"Total throughput: {success_count / total_duration:.2f} orders/second")
 
-async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_key: str):
+async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None):
     # Start time tracking
     start_time = time.time()
     
@@ -148,6 +168,10 @@ async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_k
     end_time = time.time()
     duration = end_time - start_time
     
+    # Record transaction hash and submission time for WebSocket delay tracking
+    if ws_order_tester is not None:
+        ws_order_tester.add_order_tx(tx_receipt['transactionHash'].hex(), end_time)
+    
     print(f"Order '{cloid}' placed successfully. Block number: {tx_receipt['blockNumber']}, Tx hash: {tx_receipt['transactionHash'].hex()}")
     print(f"Time taken for order '{cloid}': {duration:.4f} seconds")
     
@@ -185,18 +209,56 @@ class WsOrderTester:
         self.private_key = private_key
 
         self.shutdown_event: asyncio.Future[bool] | None = None
+        
+        # Dictionary to track order submission times by transaction hash
+        self.tx_submission_times: Dict[str, float] = {}
+        
+        # Dictionary to track WebSocket event receipt times and delays
+        self.ws_event_times: Dict[str, float] = {}
+        self.ws_event_delays: Dict[str, float] = {}
+        
+        # Track number of expected and received events
+        self.expected_events = 0
+        self.received_events = 0
+        
+        # Event to signal when all expected events have been received
+        self.all_events_received = asyncio.Event()
 
-    def on_order_created(self, payload: OrderCreatedPayload):
+    def add_order_tx(self, tx_hash: str, submission_time: float):
+        """Record the submission time of an order by transaction hash"""
+        self.tx_submission_times[tx_hash] = submission_time
+        self.expected_events += 1
+
+    async def on_order_created(self, payload: OrderCreatedPayload):
         if payload.owner != self.client.wallet_address:
             return
 
-        print(f"WebSocket even: Order created: {payload}")
+        # Record the receipt time
+        receipt_time = time.time()
+        tx_hash = payload.transaction_hash
+        if tx_hash.startswith("0x"):
+            tx_hash = tx_hash[2:]
 
-    def on_order_cancelled(self, payload: OrderCancelledPayload):
-        if payload.owner != self.client.wallet_address:
-            return
+        print(f"WebSocket event: Order created: {payload}")
+        
+        # Calculate and record the delay if we have the submission time
+        if tx_hash in self.tx_submission_times:
+            submission_time = self.tx_submission_times[tx_hash]
+            delay = receipt_time - submission_time
+            self.ws_event_times[tx_hash] = receipt_time
+            self.ws_event_delays[tx_hash] = delay
+            
+            print(f"WebSocket delay for tx {tx_hash}: {delay:.4f} seconds")
+            
+            # Increment received events counter and check if all events received
+            self.received_events += 1
+            if self.received_events >= self.expected_events:
+                self.all_events_received.set()
 
-        print(f"WebSocket even: Order cancelled: {payload}")
+    async def on_order_cancelled(self, payload: OrderCancelledPayload):
+        # Fix to access order_ids instead of owner property
+        for order_id in payload.order_ids:
+            print(f"WebSocket event: Order cancelled: order_id={order_id}")
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()
@@ -240,6 +302,25 @@ class WsOrderTester:
             loop = asyncio.get_running_loop()
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.remove_signal_handler(sig)
+    
+    def get_delay_statistics(self):
+        """Calculate statistics about the WebSocket event delays"""
+        if not self.ws_event_delays:
+            return None
+            
+        delays = list(self.ws_event_delays.values())
+        stats = {
+            "count": len(delays),
+            "min": min(delays),
+            "max": max(delays),
+            "mean": statistics.mean(delays),
+            "median": statistics.median(delays),
+        }
+        
+        if len(delays) > 1:
+            stats["std_dev"] = statistics.stdev(delays)
+            
+        return stats
 
 
 
