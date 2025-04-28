@@ -3,7 +3,7 @@ import math
 import signal
 import time
 import statistics
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, Union, TypedDict
 
 from dotenv import load_dotenv
 import pytest
@@ -18,6 +18,15 @@ from web3 import Web3
 from lib import constants
 from tests.settings import Settings
 from lib.utils.parallel import run_tasks_in_parallel
+
+
+class OrderTimingInfo(TypedDict):
+    """Type definition for order timing information"""
+    start_time: float
+    end_time: float
+    cloid: str
+    ws_time: float  # Optional in actual usage, but required in TypedDict
+
 
 @pytest.mark.asyncio
 async def test_example_place_order(settings: Settings, rate_limit=14):
@@ -43,7 +52,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 20  # Increased from 1 to get more meaningful statistics
+    num_orders = 1  # Increased from 1 to get more meaningful statistics
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
     # Build list of kwargs for each order
@@ -84,17 +93,50 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     except asyncio.TimeoutError:
         print(f"Timeout waiting for WebSocket events. Received {ws_order_tester.received_events} of {ws_order_tester.expected_events} expected events.")
     
+    # Print detailed order statistics
+    print("\n--- Detailed Order Statistics ---")
+    print(f"{'CLOID':<10} {'TX Hash':<12} {'Order Init (s)':<15} {'Order Complete (s)':<15} {'WS Event (s)':<15} {'Order Duration (s)':<18} {'WS Delay (s)':<15} {'Total (s)':<10}")
+    print("-" * 115)
+    
+    order_details = ws_order_tester.get_order_details()
+    start_reference = min([order["initiation_time"] for order in order_details]) if order_details else 0
+    
+    for order in order_details:
+        # Normalize timestamps relative to the first order
+        init_rel = order["initiation_time"] - start_reference
+        complete_rel = order["completion_time"] - start_reference
+        ws_rel = order["ws_event_time"] - start_reference
+        
+        print(f"{order['cloid']:<10} {order['tx_hash'][:10]:<12} {init_rel:.4f}{'':>7} {complete_rel:.4f}{'':>7} {ws_rel:.4f}{'':>7} {order['order_execution_duration']:.4f}{'':>10} {order['ws_event_delay']:.4f}{'':>7} {order['total_duration']:.4f}")
+    
     # Print WebSocket delay statistics
     ws_stats = ws_order_tester.get_delay_statistics()
     if ws_stats:
         print("\n--- WebSocket Event Delay Statistics ---")
-        print(f"Number of events: {ws_stats['count']}")
-        print(f"Minimum delay: {ws_stats['min']:.4f} seconds")
-        print(f"Maximum delay: {ws_stats['max']:.4f} seconds")
-        print(f"Mean delay: {ws_stats['mean']:.4f} seconds")
-        print(f"Median delay: {ws_stats['median']:.4f} seconds")
-        if 'std_dev' in ws_stats:
-            print(f"Standard deviation: {ws_stats['std_dev']:.4f} seconds")
+        
+        print("\nOrder Execution (Order Initiation to Transaction Completion):")
+        print(f"Minimum: {ws_stats['order_to_tx']['min']:.4f} seconds")
+        print(f"Maximum: {ws_stats['order_to_tx']['max']:.4f} seconds")
+        print(f"Mean: {ws_stats['order_to_tx']['mean']:.4f} seconds")
+        print(f"Median: {ws_stats['order_to_tx']['median']:.4f} seconds")
+        if 'std_dev' in ws_stats['order_to_tx']:
+            print(f"Standard deviation: {ws_stats['order_to_tx']['std_dev']:.4f} seconds")
+            
+        print("\nWebSocket Notification Delay (Transaction Completion to WebSocket Event):")
+        print(f"Minimum: {ws_stats['tx_to_ws']['min']:.4f} seconds")
+        print(f"Maximum: {ws_stats['tx_to_ws']['max']:.4f} seconds")
+        print(f"Mean: {ws_stats['tx_to_ws']['mean']:.4f} seconds")
+        print(f"Median: {ws_stats['tx_to_ws']['median']:.4f} seconds")
+        if 'std_dev' in ws_stats['tx_to_ws']:
+            print(f"Standard deviation: {ws_stats['tx_to_ws']['std_dev']:.4f} seconds")
+            
+        print("\nTotal Delay (Order Initiation to WebSocket Event):")
+        print(f"Minimum: {ws_stats['total']['min']:.4f} seconds")
+        print(f"Maximum: {ws_stats['total']['max']:.4f} seconds")
+        print(f"Mean: {ws_stats['total']['mean']:.4f} seconds")
+        print(f"Median: {ws_stats['total']['median']:.4f} seconds")
+        if 'std_dev' in ws_stats['total']:
+            print(f"Standard deviation: {ws_stats['total']['std_dev']:.4f} seconds")
     else:
         print("\nNo WebSocket event delay statistics available.")
     
@@ -129,7 +171,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
             print(f"Total throughput: {success_count / total_duration:.2f} orders/second")
 
 async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None):
-    # Start time tracking
+    # Start time tracking for order initiation
     start_time = time.time()
     
     market_address = constants.testnet_market_addresses["TEST_CHOG_MON"]
@@ -164,13 +206,13 @@ async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_k
     tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
     assert tx_receipt['status'] == 1, "Order placement failed"
     
-    # End time tracking
+    # End time tracking - this is when the transaction is completed
     end_time = time.time()
     duration = end_time - start_time
     
-    # Record transaction hash and submission time for WebSocket delay tracking
+    # Record transaction hash, cloid, start time and end time for WebSocket delay tracking
     if ws_order_tester is not None:
-        ws_order_tester.add_order_tx(tx_receipt['transactionHash'].hex(), end_time)
+        ws_order_tester.add_order_tx(tx_receipt['transactionHash'].hex(), start_time, end_time, cloid)
     
     print(f"Order '{cloid}' placed successfully. Block number: {tx_receipt['blockNumber']}, Tx hash: {tx_receipt['transactionHash'].hex()}")
     print(f"Time taken for order '{cloid}': {duration:.4f} seconds")
@@ -210,12 +252,8 @@ class WsOrderTester:
 
         self.shutdown_event: asyncio.Future[bool] | None = None
         
-        # Dictionary to track order submission times by transaction hash
-        self.tx_submission_times: Dict[str, float] = {}
-        
-        # Dictionary to track WebSocket event receipt times and delays
-        self.ws_event_times: Dict[str, float] = {}
-        self.ws_event_delays: Dict[str, float] = {}
+        # Dictionary to track order times by transaction hash
+        self.order_times: Dict[str, Dict[str, Any]] = {}
         
         # Track number of expected and received events
         self.expected_events = 0
@@ -224,38 +262,58 @@ class WsOrderTester:
         # Event to signal when all expected events have been received
         self.all_events_received = asyncio.Event()
 
-    def add_order_tx(self, tx_hash: str, submission_time: float):
-        """Record the submission time of an order by transaction hash"""
-        self.tx_submission_times[tx_hash] = submission_time
+    def add_order_tx(self, tx_hash: str, start_time: float, end_time: float, cloid: str):
+        """Record the times for an order by transaction hash"""
+        # Normalize tx_hash by removing '0x' prefix if present
+        if tx_hash.startswith("0x"):
+            tx_hash = tx_hash[2:]
+            
+        self.order_times[tx_hash] = {
+            "start_time": start_time,
+            "end_time": end_time,
+            "cloid": cloid
+        }
         self.expected_events += 1
 
-    async def on_order_created(self, payload: OrderCreatedPayload):
+    def on_order_created(self, payload: OrderCreatedPayload):
         if payload.owner != self.client.wallet_address:
             return
 
         # Record the receipt time
         receipt_time = time.time()
         tx_hash = payload.transaction_hash
+        
+        # Normalize tx_hash by removing '0x' prefix if present
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
-
+        
         print(f"WebSocket event: Order created: {payload}")
         
-        # Calculate and record the delay if we have the submission time
-        if tx_hash in self.tx_submission_times:
-            submission_time = self.tx_submission_times[tx_hash]
-            delay = receipt_time - submission_time
-            self.ws_event_times[tx_hash] = receipt_time
-            self.ws_event_delays[tx_hash] = delay
+        # Record the WebSocket event time if we have this transaction
+        if tx_hash in self.order_times:
+            order_info = self.order_times[tx_hash]
+            order_info["ws_time"] = receipt_time
+            cloid = order_info["cloid"]
             
-            print(f"WebSocket delay for tx {tx_hash}: {delay:.4f} seconds")
+            # Calculate delays
+            start_time = float(order_info["start_time"])
+            end_time = float(order_info["end_time"])
+            
+            start_to_end = end_time - start_time
+            end_to_ws = receipt_time - end_time
+            total_delay = receipt_time - start_time
+            
+            print(f"WebSocket event for order '{cloid}' (tx {tx_hash}):")
+            print(f"  Order initiation to completion: {start_to_end:.4f} seconds")
+            print(f"  Order completion to WebSocket event: {end_to_ws:.4f} seconds")
+            print(f"  Total delay (initiation to WebSocket): {total_delay:.4f} seconds")
             
             # Increment received events counter and check if all events received
             self.received_events += 1
             if self.received_events >= self.expected_events:
                 self.all_events_received.set()
 
-    async def on_order_cancelled(self, payload: OrderCancelledPayload):
+    def on_order_cancelled(self, payload: OrderCancelledPayload):
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
             print(f"WebSocket event: Order cancelled: order_id={order_id}")
@@ -305,22 +363,83 @@ class WsOrderTester:
     
     def get_delay_statistics(self):
         """Calculate statistics about the WebSocket event delays"""
-        if not self.ws_event_delays:
+        if not self.order_times:
             return None
             
-        delays = list(self.ws_event_delays.values())
+        # Collect delays for orders that have received WebSocket events
+        tx_to_ws_delays = []
+        order_to_tx_delays = []
+        total_delays = []
+        
+        for tx_hash, times in self.order_times.items():
+            if "ws_time" in times:
+                start_time = float(times["start_time"])
+                end_time = float(times["end_time"])
+                ws_time = float(times["ws_time"])
+                
+                tx_to_ws_delay = ws_time - end_time
+                order_to_tx_delay = end_time - start_time 
+                total_delay = ws_time - start_time
+                
+                tx_to_ws_delays.append(tx_to_ws_delay)
+                order_to_tx_delays.append(order_to_tx_delay)
+                total_delays.append(total_delay)
+        
+        if not tx_to_ws_delays:
+            return None
+            
         stats = {
-            "count": len(delays),
-            "min": min(delays),
-            "max": max(delays),
-            "mean": statistics.mean(delays),
-            "median": statistics.median(delays),
+            "count": len(tx_to_ws_delays),
+            "tx_to_ws": {
+                "min": min(tx_to_ws_delays),
+                "max": max(tx_to_ws_delays),
+                "mean": statistics.mean(tx_to_ws_delays),
+                "median": statistics.median(tx_to_ws_delays)
+            },
+            "order_to_tx": {
+                "min": min(order_to_tx_delays),
+                "max": max(order_to_tx_delays),
+                "mean": statistics.mean(order_to_tx_delays),
+                "median": statistics.median(order_to_tx_delays)
+            },
+            "total": {
+                "min": min(total_delays),
+                "max": max(total_delays),
+                "mean": statistics.mean(total_delays),
+                "median": statistics.median(total_delays)
+            }
         }
         
-        if len(delays) > 1:
-            stats["std_dev"] = statistics.stdev(delays)
+        if len(tx_to_ws_delays) > 1:
+            stats["tx_to_ws"]["std_dev"] = statistics.stdev(tx_to_ws_delays)
+            stats["order_to_tx"]["std_dev"] = statistics.stdev(order_to_tx_delays)
+            stats["total"]["std_dev"] = statistics.stdev(total_delays)
             
         return stats
+        
+    def get_order_details(self):
+        """Get detailed order timing information for each order"""
+        result = []
+        
+        for tx_hash, times in self.order_times.items():
+            if "ws_time" in times:
+                start_time = float(times["start_time"])
+                end_time = float(times["end_time"])
+                ws_time = float(times["ws_time"])
+                
+                record = {
+                    "cloid": times["cloid"],
+                    "tx_hash": tx_hash,
+                    "initiation_time": start_time,
+                    "completion_time": end_time,
+                    "ws_event_time": ws_time,
+                    "order_execution_duration": end_time - start_time,
+                    "ws_event_delay": ws_time - end_time,
+                    "total_duration": ws_time - start_time
+                }
+                result.append(record)
+        
+        return sorted(result, key=lambda x: x["cloid"])
 
 
 
