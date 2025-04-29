@@ -3,6 +3,7 @@ import os
 import signal
 
 import pytest
+import structlog
 from dotenv import load_dotenv
 from kuru_sdk import ClientOrderExecutor
 from kuru_sdk.types import OrderCreatedPayload, TradePayload, OrderCancelledPayload
@@ -11,11 +12,12 @@ from web3 import Web3
 
 from lib.constants import testnet_market_addresses
 
+log = structlog.get_logger(__name__)
 
 @pytest.mark.asyncio
 async def test_ws_handler():
     load_dotenv()
-    print("Test ws handler")
+    log.info("Test ws handler")
 
     ws_order_controller = WsOrderController(
         market_address=testnet_market_addresses["TEST_CHOG_MON"],  # Orderbook address
@@ -29,17 +31,17 @@ async def test_ws_handler():
 
         await asyncio.sleep(3)
 
-        print("Waiting for information. Press Ctrl+C to exit.")
+        log.info("Waiting for information. Press Ctrl+C to exit.")
         await ws_order_controller.shutdown_event  # Wait until shutdown signal is received
 
     except asyncio.CancelledError:
-        print("Main task cancelled.")
+        log.info("Main task cancelled.")
     finally:
     # Ensure disconnect is called even if there's an error before shutdown_event is awaited
         if ws_order_controller.shutdown_event and not ws_order_controller.shutdown_event.done():
-            print("Performing cleanup due to unexpected exit...")
+            log.info("Performing cleanup due to unexpected exit...")
             # await self.ws_client.disconnect()
-            print("Client disconnected.")
+            log.info("Client disconnected.")
 
 
 
@@ -56,9 +58,10 @@ class WsOrderController:
         self.cloid_to_order = {}
         self.order_id_to_cloid = {}
         self.cloid_status = {}
+        self.log = structlog.get_logger(__name__)
 
     def on_order_created(self, payload: OrderCreatedPayload):
-        print(f"Order created: {payload}")
+        self.log.info("Order created", payload=payload)
         cloid = self.client.order_id_to_cloid[payload.order_id]
         if cloid:
             self.client.cloid_to_order[cloid].size = payload.remaining_size
@@ -69,13 +72,13 @@ class WsOrderController:
                 self.cloid_status[cloid] = "filled"
             else:
                 self.cloid_status[cloid] = "active"
-            print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-            print(self.client.cloid_to_order[cloid])
-            print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+            self.log.debug("Order details", 
+                       cloid=cloid, 
+                       order=self.client.cloid_to_order[cloid])
 
 
     def on_trade(self, payload: TradePayload):
-        print(f"Trade: {payload}")
+        self.log.info("Trade received", payload=payload)
         order_id = payload.order_id
         cloid = self.client.order_id_to_cloid[order_id]
         if cloid:
@@ -84,22 +87,22 @@ class WsOrderController:
                 self.cloid_status[cloid] = "filled"
             else:
                 self.cloid_status[cloid] = "partially_filled"
-            print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-            print(self.client.cloid_to_order[cloid])
-            print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+            self.log.debug("Order updated after trade", 
+                       cloid=cloid, 
+                       order=self.client.cloid_to_order[cloid])
 
 
     def on_order_cancelled(self, payload: OrderCancelledPayload):
         cloid = 0
-        print(f"Order cancelled: {payload}")
+        self.log.info("Order cancelled", payload=payload)
         for order_id in payload.order_ids:
             cloid = self.client.order_id_to_cloid[order_id]
             if cloid:
                 self.client.cloid_to_order[cloid].is_cancelled = True
                 self.cloid_status[cloid] = "cancelled"
-        print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-        print(self.client.cloid_to_order[cloid])
-        print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+        self.log.debug("Order details after cancellation", 
+                   cloid=cloid, 
+                   order=self.client.cloid_to_order[cloid])
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()
@@ -127,14 +130,14 @@ class WsOrderController:
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown(s)))
 
     async def shutdown(self, sig):
-        print(f"\nReceived exit signal {sig.name}...")
-        print("Disconnecting client...")
+        self.log.info("Received exit signal", signal=sig.name)
+        self.log.info("Disconnecting client...")
         try:
             await self.ws_client.disconnect()
         except Exception as e:
-            print(f"Error during disconnect: {e}")
+            self.log.error("Error during disconnect", error=str(e))
         finally:
-            print("Client disconnected.")
+            self.log.info("Client disconnected.")
             self.shutdown_event.set_result(True)
             # Optional: Clean up signal handlers
             loop = asyncio.get_running_loop()

@@ -1,12 +1,15 @@
 import asyncio
 import math
 import signal
+import sys
 import time
 import statistics
+import traceback
 from typing import Optional, Dict, Any, Union, TypedDict
 
 from dotenv import load_dotenv
 import pytest
+import structlog
 from eth_typing import HexStr
 from eth_utils.currency import from_wei, to_wei
 from kuru_sdk import MarginAccount, TxOptions
@@ -19,6 +22,7 @@ from lib import constants
 from tests.settings import Settings
 from lib.utils.parallel import run_tasks_in_parallel
 
+log = structlog.get_logger(__name__)
 
 class OrderTimingInfo(TypedDict):
     """Type definition for order timing information"""
@@ -52,12 +56,19 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
         rpc_url=settings.full_rpc_url(),
         private_key=settings.private_key
     )
-    await ws_order_tester.initialize()
+
+    try:
+        await ws_order_tester.initialize()
+    except Exception as e:
+        log.error("Error initializing WebSocket tester", error=e)
+        log.exception(e)
+
+        assert False
 
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 1  # Increased from 1 to get more meaningful statistics
+    num_orders = 20  # Increased from 1 to get more meaningful statistics
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
     # Build list of kwargs for each order
@@ -78,7 +89,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     # Track total time for all orders
     start_time_total = time.time()
     
-    print(f"\nRunning {num_orders} orders with rate limit of {rate_limit} orders per second...")
+    log.info("Running orders with rate limit", num_orders=num_orders, rate_limit=rate_limit)
     success_count, fail_count, time_stats = run_tasks_in_parallel(
         fn=create_limit_buy_order,
         kwargs_list=tasks_kwargs,
@@ -88,16 +99,22 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     end_time_total = time.time()
     total_duration = end_time_total - start_time_total
     
-    print(f"\n{success_count} orders have been placed successfully. {fail_count} orders have failed.")
-    print(f"Total time for all orders: {total_duration:.2f} seconds")
+    log.info("Order placement complete", 
+             success_count=success_count, 
+             fail_count=fail_count, 
+             total_duration=f"{total_duration:.2f}")
     
     # Wait for all WebSocket events to be received (with a timeout)
-    print(f"\nWaiting for WebSocket events to be received. Expected: {ws_order_tester.expected_events} events, Received: {ws_order_tester.received_events} events ...")
+    log.info("Waiting for WebSocket events", 
+             expected_events=ws_order_tester.expected_events, 
+             received_events=ws_order_tester.received_events)
     try:
         await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
-        print(f"All {ws_order_tester.received_events} WebSocket events received.")
+        log.info("All WebSocket events received", event_count=ws_order_tester.received_events)
     except asyncio.TimeoutError:
-        print(f"Timeout waiting for WebSocket events. Received {ws_order_tester.received_events} of {ws_order_tester.expected_events} expected events.")
+        log.warning("Timeout waiting for WebSocket events", 
+                    received=ws_order_tester.received_events, 
+                    expected=ws_order_tester.expected_events)
     
     # Print detailed order statistics
     print("\n--- Detailed Order Statistics ---")
@@ -144,7 +161,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
         if 'std_dev' in ws_stats['total']:
             print(f"Standard deviation: {ws_stats['total']['std_dev']:.4f} seconds")
     else:
-        print("\nNo WebSocket event delay statistics available.")
+        log.info("No WebSocket event delay statistics available.")
     
     await ws_order_tester.shutdown(signal.SIGINT)
     
@@ -182,11 +199,10 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
     
     market_address = constants.testnet_market_addresses["TEST_CHOG_MON"]
 
-    print(f"\nOrder {cloid}:")
-    print(f"Wallet address: {client.wallet_address}")
+    log.info("Order", cloid=cloid, wallet_address=client.wallet_address)
 
     balance = web3.eth.get_balance(client.wallet_address)
-    print(f"Wallet balance: {web3.from_wei(balance, 'ether')} MON")
+    log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
 
     order = OrderRequest(
         market_address=market_address,
@@ -198,7 +214,7 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
         cloid=cloid
     )
     tx_options = TxOptions(nonce=nonce)
-    print(f"Placing limit buy order: {order.size} units at {order.price} with cloid {cloid}")
+    log.info("Placing limit buy order", size=order.size, price=order.price, cloid=cloid)
     tx_hash = await client.place_order(order, tx_options)
 
     assert tx_hash is not None
@@ -215,8 +231,11 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
     if ws_order_tester is not None:
         ws_order_tester.add_order_tx(tx_receipt['transactionHash'].hex(), start_time, end_time, cloid)
     
-    print(f"Order '{cloid}' placed successfully. Block number: {tx_receipt['blockNumber']}, Tx hash: {tx_receipt['transactionHash'].hex()}")
-    print(f"Time taken for order '{cloid}': {duration:.4f} seconds")
+    log.info("Order placed successfully", 
+             cloid=cloid, 
+             block_number=tx_receipt['blockNumber'], 
+             tx_hash=tx_receipt['transactionHash'].hex(), 
+             duration=f"{duration:.4f}")
     
     # Return duration along with cloid for statistics
     return {"cloid": cloid, "duration": duration}
@@ -233,7 +252,7 @@ async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int,
     size_wei = 10 * math.ceil(float(size_wei) / 10)
 
     margin_account_deposit_tx_hash = await margin_account.deposit(margin_account.NATIVE, size_wei)
-    print(f"Deposit transaction hash: {margin_account_deposit_tx_hash}")
+    log.info("Deposit transaction hash", tx_hash=margin_account_deposit_tx_hash)
 
     assert margin_account_deposit_tx_hash is not None
     assert len(margin_account_deposit_tx_hash) > 0
@@ -241,7 +260,7 @@ async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int,
     # Wait for the deposit transaction to be confirmed
     tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(margin_account_deposit_tx_hash))
     assert tx_receipt['status'] == 1, "Deposit transaction failed"
-    print(f"Deposit transaction confirmed in block {tx_receipt['blockNumber']}")
+    log.info("Deposit transaction confirmed", block_number=tx_receipt['blockNumber'])
 
 
 class WsOrderTester:
@@ -250,6 +269,7 @@ class WsOrderTester:
         self.ws_url = ws_url
         self.rpc_url = rpc_url
         self.private_key = private_key
+        self.log = structlog.get_logger(__name__)
 
         self.shutdown_event: asyncio.Future[bool] | None = None
         
@@ -288,7 +308,7 @@ class WsOrderTester:
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
         
-        print(f"WebSocket event: Order created: {payload}")
+        self.log.info("WebSocket event: Order created", payload=payload)
         
         # Record the WebSocket event time if we have this transaction
         if tx_hash in self.order_times:
@@ -304,10 +324,12 @@ class WsOrderTester:
             end_to_ws = receipt_time - end_time
             total_delay = receipt_time - start_time
             
-            print(f"WebSocket event for order '{cloid}' (tx {tx_hash}):")
-            print(f"  Order initiation to completion: {start_to_end:.4f} seconds")
-            print(f"  Order completion to WebSocket event: {end_to_ws:.4f} seconds")
-            print(f"  Total delay (initiation to WebSocket): {total_delay:.4f} seconds")
+            self.log.info("WebSocket event timing", 
+                       cloid=cloid, 
+                       tx_hash=tx_hash,
+                       order_init_to_completion=f"{start_to_end:.4f}",
+                       order_completion_to_ws=f"{end_to_ws:.4f}",
+                       total_delay=f"{total_delay:.4f}")
             
             # Increment received events counter and check if all events received
             self.received_events += 1
@@ -317,7 +339,7 @@ class WsOrderTester:
     async def on_order_cancelled(self, payload: OrderCancelledPayload):
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
-            print(f"WebSocket event: Order cancelled: order_id={order_id}")
+            self.log.info("WebSocket event: Order cancelled", order_id=order_id)
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()
@@ -347,14 +369,14 @@ class WsOrderTester:
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown(s)))
 
     async def shutdown(self, sig):
-        print(f"\nReceived exit signal {sig.name}...")
-        print("Disconnecting client...")
+        self.log.info("Received exit signal", signal=sig.name)
+        self.log.info("Disconnecting client...")
         try:
             await self.ws_client.disconnect()
         except Exception as e:
-            print(f"Error during disconnect: {e}")
+            self.log.error("Error during disconnect", error=str(e))
         finally:
-            print("Client disconnected.")
+            self.log.info("Client disconnected.")
             if self.shutdown_event is not None:
                 self.shutdown_event.set_result(True)
             # Optional: Clean up signal handlers
@@ -458,10 +480,10 @@ async def test_clear_margin_account_balance(settings: Settings):
 
     # Clear the margin account balance
     balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
-    print(f"Clearing margin account balance: {from_wei(balance, "ether")} MON")
+    log.info("Clearing margin account balance", balance=f"{from_wei(balance, 'ether')} MON")
     if balance > 0:
         tx_hash = await margin_account.withdraw(margin_account.NATIVE, balance)
-        print(f"Withdraw transaction hash: {tx_hash}")
+        log.info("Withdraw transaction hash", tx_hash=tx_hash)
         assert tx_hash is not None
         assert len(tx_hash) > 0
 
@@ -469,5 +491,5 @@ async def test_clear_margin_account_balance(settings: Settings):
         assert receipt["status"] == 1
 
         balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
-        print(f"New margin account balance: {from_wei(balance, "ether")} MON")
+        log.info("New margin account balance", balance=f"{from_wei(balance, 'ether')} MON")
         assert balance == 0

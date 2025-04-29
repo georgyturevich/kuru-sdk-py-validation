@@ -1,9 +1,12 @@
 import asyncio
 import sys
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from pyrate_limiter import Duration, Rate, Limiter
+import structlog
 
+log = structlog.get_logger(__name__)
 
 def run_tasks_in_parallel(
     fn: Callable[..., Any],
@@ -77,11 +80,9 @@ def run_tasks_in_parallel(
                     time_stats[result['cloid']] = result['duration']
                 success += 1
             except Exception as e:
-                # print exception information
-                print(f"Exception in task {futures[fut]}: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
-
+                # Log exception information with structlog
+                log.error("Exception in task", task_id=futures[fut], error=str(e))
+                log.exception(e)
                 failure += 1
 
     return success, failure, time_stats 
