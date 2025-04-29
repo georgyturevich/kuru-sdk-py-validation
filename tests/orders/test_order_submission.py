@@ -63,6 +63,9 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
 
         assert False
 
+    balance = web3.eth.get_balance(client.wallet_address)
+    log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
+
     price = "0.00000284"
     size = "10000"
 
@@ -107,7 +110,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
              expected_events=ws_order_tester.expected_events, 
              received_events=ws_order_tester.received_events)
     try:
-        await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
+        await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=30)
         log.info("All WebSocket events received", event_count=ws_order_tester.received_events)
     except asyncio.TimeoutError:
         log.warning("Timeout waiting for WebSocket events", 
@@ -199,9 +202,6 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
 
     log.info("Order", cloid=cloid, wallet_address=client.wallet_address)
 
-    balance = web3.eth.get_balance(client.wallet_address)
-    log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
-
     order = OrderRequest(
         market_address=market_address,
         order_type='limit',
@@ -217,9 +217,12 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
+    log.info("Limit order transaction sent", tx_hash=tx_hash, cloid=cloid)
 
-    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
+    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash), timeout=30)
+    log.info("Limit order transaction receipt received", tx_receipt=tx_receipt, tx_hash=tx_hash, cloid=cloid)
     assert tx_receipt['status'] == 1, "Order placement failed"
+
     
     # End time tracking - this is when the transaction is completed
     end_time = time.time()
@@ -298,6 +301,7 @@ class WsOrderTester:
         if payload.owner != self.client.wallet_address:
             return
 
+        log.info("WebSocket OrderCreated event received", tx_hash = payload.transaction_hash)
         # Record the receipt time
         receipt_time = time.time()
         tx_hash = payload.transaction_hash
