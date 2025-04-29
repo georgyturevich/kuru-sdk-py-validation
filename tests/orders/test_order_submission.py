@@ -40,6 +40,11 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
 
     web3 = Web3(Web3.HTTPProvider(settings.full_rpc_url()))
 
+    client = ClientOrderExecutor(
+        web3=web3,
+        contract_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
+        private_key=settings.private_key,
+    )
 
     ws_order_tester = WsOrderTester(
         market_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
@@ -61,6 +66,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     for i in range(num_orders):
         tasks_kwargs.append({
             "web3": Web3(Web3.HTTPProvider(settings.full_rpc_url())),
+            "client": client,
             "price": price,
             "size": size,
             "cloid": f"mm_{i+1}",
@@ -86,7 +92,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     print(f"Total time for all orders: {total_duration:.2f} seconds")
     
     # Wait for all WebSocket events to be received (with a timeout)
-    print("\nWaiting for WebSocket events to be received...")
+    print(f"\nWaiting for WebSocket events to be received. Expected: {ws_order_tester.expected_events} events, Received: {ws_order_tester.received_events} events ...")
     try:
         await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
         print(f"All {ws_order_tester.received_events} WebSocket events received.")
@@ -170,16 +176,11 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
                 
             print(f"Total throughput: {success_count / total_duration:.2f} orders/second")
 
-async def create_limit_buy_order(web3, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None):
+async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None):
     # Start time tracking for order initiation
     start_time = time.time()
     
     market_address = constants.testnet_market_addresses["TEST_CHOG_MON"]
-    client = ClientOrderExecutor(
-        web3=web3,
-        contract_address=market_address,
-        private_key=private_key,
-    )
 
     print(f"\nOrder {cloid}:")
     print(f"Wallet address: {client.wallet_address}")
@@ -275,7 +276,7 @@ class WsOrderTester:
         }
         self.expected_events += 1
 
-    def on_order_created(self, payload: OrderCreatedPayload):
+    async def on_order_created(self, payload: OrderCreatedPayload):
         if payload.owner != self.client.wallet_address:
             return
 
@@ -313,7 +314,7 @@ class WsOrderTester:
             if self.received_events >= self.expected_events:
                 self.all_events_received.set()
 
-    def on_order_cancelled(self, payload: OrderCancelledPayload):
+    async def on_order_cancelled(self, payload: OrderCancelledPayload):
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
             print(f"WebSocket event: Order cancelled: order_id={order_id}")
