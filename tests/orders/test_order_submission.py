@@ -1,11 +1,9 @@
 import asyncio
 import math
 import signal
-import sys
 import time
 import statistics
-import traceback
-from typing import Optional, Dict, Any, Union, TypedDict
+from typing import Optional, Dict, Any, TypedDict
 
 from dotenv import load_dotenv
 import pytest

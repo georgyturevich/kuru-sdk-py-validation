@@ -40,17 +40,9 @@ try:
     # Some code that might raise an exception
     result = process_data()
 except Exception as e:
-    log.error("Error processing data", 
-              error=str(e),
-              error_type=type(e).__name__)
-    # Or with full traceback
-    import sys
-    import traceback
-    exc_info = sys.exc_info()
-    tb_string = ''.join(traceback.format_exception(*exc_info))
-    log.error("Error with traceback", 
-              error=str(e),
-              traceback=tb_string)
+    # with full traceback
+    log.error("Error with traceback", error=str(e))
+    log.exception(e)
 ```
 
 ### Best Practices
@@ -72,11 +64,7 @@ except Exception as e:
 
 The logging system is automatically configured in `lib/utils/logging_config.py`. The configuration:
 
-1. Sets up structlog to use standard processors
-2. Forwards logs to the Python standard logging library
-3. Configures a standard logging handler with JSON rendering
-
-You don't need to explicitly configure logging in your modules - just import and use the logger.
+- Sets up structlog
 
 ## pytest Integration
 
@@ -84,7 +72,6 @@ The pytest configuration in `pytest.ini` is set up to:
 
 - Display logs in real-time during test runs (`log_cli = true`)
 - Set console logging level to INFO (`log_cli_level = INFO`)
-- Save detailed logs to a file (`log_file = test_run.log`)
 - Use a simple format that preserves the JSON structure (`log_format = %(message)s`)
 
 ## Migrating from Print Statements

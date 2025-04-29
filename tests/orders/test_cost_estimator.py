@@ -1,8 +1,5 @@
-import os
-
 import pytest
 import structlog
-from dotenv import load_dotenv
 from kuru_sdk import Orderbook
 from web3 import Web3
 

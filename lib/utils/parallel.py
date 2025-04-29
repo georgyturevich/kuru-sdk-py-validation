@@ -1,6 +1,4 @@
 import asyncio
-import sys
-import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from pyrate_limiter import Duration, Rate, Limiter
