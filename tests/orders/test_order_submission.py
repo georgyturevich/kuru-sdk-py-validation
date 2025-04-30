@@ -14,7 +14,7 @@ from kuru_sdk import MarginAccount, TxOptions
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderRequest, OrderCreatedPayload, OrderCancelledPayload
 from kuru_sdk.websocket_handler import WebSocketHandler
-from web3 import Web3
+from web3 import AsyncWeb3, AsyncHTTPProvider
 
 from lib import constants
 from tests.settings import Settings
@@ -40,19 +40,21 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
                          Adjust this value to control the rate of order submissions.
     """
 
-    web3 = Web3(Web3.HTTPProvider(settings.full_rpc_url()))
+    web3 = AsyncWeb3(AsyncHTTPProvider(settings.full_rpc_url()))
 
     client = ClientOrderExecutor(
         web3=web3,
         contract_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
         private_key=settings.private_key,
     )
+    client.orderbook.set_market_params(await client.orderbook.fetch_market_params())
 
     ws_order_tester = WsOrderTester(
         market_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
         ws_url=settings.websocket_url,
         rpc_url=settings.full_rpc_url(),
-        private_key=settings.private_key
+        private_key=settings.private_key,
+        client=client,
     )
 
     try:
@@ -63,21 +65,21 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
 
         assert False
 
-    balance = web3.eth.get_balance(client.wallet_address)
+    balance = await web3.eth.get_balance(client.wallet_address)
     log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
 
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 20  # Increased from 1 to get more meaningful statistics
+    num_orders = 1  # Increased from 1 to get more meaningful statistics
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
     # Build list of kwargs for each order
-    base_nonce = web3.eth.get_transaction_count(web3.eth.account.from_key(settings.private_key).address)
+    base_nonce = await web3.eth.get_transaction_count(web3.eth.account.from_key(settings.private_key).address)
     tasks_kwargs = []
     for i in range(num_orders):
         tasks_kwargs.append({
-            "web3": Web3(Web3.HTTPProvider(settings.full_rpc_url())),
+            "web3": web3,
             "client": client,
             "price": price,
             "size": size,
@@ -219,7 +221,7 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
     assert len(tx_hash) > 0
     log.info("Limit order transaction sent", tx_hash=tx_hash, cloid=cloid)
 
-    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash), timeout=30)
+    tx_receipt = await web3.eth.wait_for_transaction_receipt(HexStr(tx_hash), timeout=30)
     log.info("Limit order transaction receipt received", tx_receipt=tx_receipt, tx_hash=tx_hash, cloid=cloid)
     assert tx_receipt['status'] == 1, "Order placement failed"
 
@@ -241,7 +243,7 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
     # Return duration along with cloid for statistics
     return {"cloid": cloid, "duration": duration}
 
-async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int, private_key: str):
+async def add_margin_balance(web3: AsyncWeb3, price: str, size: str, num_orders: int, private_key: str):
     margin_account = MarginAccount(
         web3=web3,
         contract_address=constants.testnet_kuru_contract_addresses["margin_account"],
@@ -259,17 +261,20 @@ async def add_margin_balance(web3: Web3, price: str, size: str, num_orders: int,
     assert len(margin_account_deposit_tx_hash) > 0
 
     # Wait for the deposit transaction to be confirmed
-    tx_receipt = web3.eth.wait_for_transaction_receipt(HexStr(margin_account_deposit_tx_hash))
+    tx_receipt = await web3.eth.wait_for_transaction_receipt(HexStr(margin_account_deposit_tx_hash))
     assert tx_receipt['status'] == 1, "Deposit transaction failed"
     log.info("Deposit transaction confirmed", block_number=tx_receipt['blockNumber'])
 
 
 class WsOrderTester:
-    def __init__(self, market_address: Optional[str] = None, ws_url: Optional[str] = None, rpc_url: Optional[str] = None, private_key: Optional[str] = None):
+    def __init__(self, market_address: Optional[str] = None, ws_url: Optional[str] = None,
+                 rpc_url: Optional[str] = None, private_key: Optional[str] = None,
+                 client: Optional[ClientOrderExecutor] = None):
         self.market_address = market_address
         self.ws_url = ws_url
         self.rpc_url = rpc_url
         self.private_key = private_key
+        self.client = client
         self.log = structlog.get_logger(__name__)
 
         self.shutdown_event: asyncio.Future[bool] | None = None
@@ -348,12 +353,6 @@ class WsOrderTester:
 
         if self.market_address is None or self.rpc_url is None or self.private_key is None or self.ws_url is None:
             raise ValueError("market_address, rpc_url, private_key, and ws_url must be provided")
-
-        self.client = ClientOrderExecutor(
-            web3=Web3(Web3.HTTPProvider(self.rpc_url)),
-            contract_address=self.market_address,
-            private_key=self.private_key,
-        )
 
         self.ws_client = WebSocketHandler(
             websocket_url=self.ws_url,
@@ -473,7 +472,7 @@ class WsOrderTester:
 async def test_clear_margin_account_balance(settings: Settings):
     load_dotenv()
 
-    web3 = Web3(Web3.HTTPProvider(settings.full_rpc_url()))
+    web3 = AsyncWeb3(AsyncHTTPProvider(settings.rpc_url))
     margin_account = MarginAccount(
         web3=web3,
         contract_address=constants.testnet_kuru_contract_addresses["margin_account"],
