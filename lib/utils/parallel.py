@@ -2,20 +2,9 @@ import asyncio
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Awaitable
 
 import asynciolimiter
-from pyrate_limiter import Duration, Rate, Limiter
-from pyrate_limiter.abstracts import AbstractClock
 import structlog
 
 log = structlog.get_logger(__name__)
-
-class AsyncClock(AbstractClock):
-    """A clock implementation that returns an awaitable timestamp"""
-    
-    def now(self) -> Awaitable[int]:
-        """Return current timestamp as an awaitable"""
-        async def _now() -> int:
-            return int(asyncio.get_event_loop().time() * 1000)
-        return _now()
 
 async def run_tasks_in_parallel(
     fn: Callable[..., Any],
