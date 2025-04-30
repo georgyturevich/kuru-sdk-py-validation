@@ -93,7 +93,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     start_time_total = time.time()
     
     log.info("Running orders with rate limit", num_orders=num_orders, rate_limit=rate_limit)
-    success_count, fail_count, time_stats = run_tasks_in_parallel(
+    success_count, fail_count, time_stats = await run_tasks_in_parallel(
         fn=create_limit_buy_order,
         kwargs_list=tasks_kwargs,
         rate_limit=rate_limit,
@@ -470,9 +470,7 @@ class WsOrderTester:
 
 @pytest.mark.asyncio
 async def test_clear_margin_account_balance(settings: Settings):
-    load_dotenv()
-
-    web3 = AsyncWeb3(AsyncHTTPProvider(settings.rpc_url))
+    web3 = AsyncWeb3(AsyncHTTPProvider(settings.full_rpc_url()))
     margin_account = MarginAccount(
         web3=web3,
         contract_address=constants.testnet_kuru_contract_addresses["margin_account"],
@@ -488,7 +486,7 @@ async def test_clear_margin_account_balance(settings: Settings):
         assert tx_hash is not None
         assert len(tx_hash) > 0
 
-        receipt = web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
+        receipt = await web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
         assert receipt["status"] == 1
 
         balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
