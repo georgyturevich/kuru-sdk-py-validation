@@ -31,7 +31,7 @@ class OrderTimingInfo(TypedDict):
 
 
 @pytest.mark.asyncio
-async def test_example_place_order(settings: Settings, rate_limit=14):
+async def test_example_place_order(settings: Settings, rate_limit=4):
     """
     Test placing multiple limit buy orders with rate limiting.
 
@@ -71,7 +71,8 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 1  # Increased from 1 to get more meaningful statistics
+    num_orders = 10  # Increased from 1 to get more meaningful statistics
+
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
     # Build list of kwargs for each order
@@ -96,7 +97,7 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
     success_count, fail_count, time_stats = await run_tasks_in_parallel(
         fn=create_limit_buy_order,
         kwargs_list=tasks_kwargs,
-        rate_limit=rate_limit,
+        rate_limit=rate_limit
     )
     
     end_time_total = time.time()
@@ -195,6 +196,8 @@ async def test_example_place_order(settings: Settings, rate_limit=14):
                 print(f"Standard deviation: {std_dev:.4f} seconds")
                 
             print(f"Total throughput: {success_count / total_duration:.2f} orders/second")
+
+        assert success_count == num_orders, "Incorrect number of orders placed"
 
 async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None):
     # Start time tracking for order initiation
