@@ -122,7 +122,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     
     # Print detailed order statistics
     print("\n--- Detailed Order Statistics ---")
-    print(f"{'CLOID':<10} {'TX Hash':<12} {'Order Init (s)':<15} {'Order Complete (s)':<15} {'WS Event (s)':<15} {'Order Duration (s)':<18} {'WS Delay (s)':<15} {'Total (s)':<10}")
+    print(f"{'CLOID':<10} {'TX Hash':<12} {'Init(rel)':<10} {'Complete(rel)':<15} {'WS Event':<10} {'Duration':<10} {'WS Delay':<10} {'Total':<10}")
     print("-" * 115)
     
     order_details = ws_order_tester.get_order_details()
@@ -134,7 +134,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
         complete_rel = order["completion_time"] - start_reference
         ws_rel = order["ws_event_time"] - start_reference
         
-        print(f"{order['cloid']:<10} {order['tx_hash'][:10]:<12} {init_rel:.4f}{'':>7} {complete_rel:.4f}{'':>7} {ws_rel:.4f}{'':>7} {order['order_execution_duration']:.4f}{'':>10} {order['ws_event_delay']:.4f}{'':>7} {order['total_duration']:.4f}")
+        print(f"{order['cloid']:<10} {order['tx_hash'][:10]:<12} {init_rel:.4f}{'':>4} {complete_rel:.4f}{'':>9} {ws_rel:.4f}{'':>4} {order['order_execution_duration']:.4f}{'':>4} {order['ws_event_delay']:.4f}{'':>4} {order['total_duration']:.4f}")
     
     # Print WebSocket delay statistics
     ws_stats = ws_order_tester.get_delay_statistics()
