@@ -24,9 +24,9 @@ def configure_logging():
         wrapper_class=structlog.make_filtering_bound_logger(logging.NOTSET),
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=False
+        cache_logger_on_first_use=False,
     )
-    
+
     # Set up a processor for formatting
     formatter = structlog.stdlib.ProcessorFormatter(
         processor=structlog.dev.ConsoleRenderer(colors=False),
@@ -52,5 +52,5 @@ def configure_logging():
 
 
 def configure_libraries_loggers():
-    logging.getLogger('engineio.client').setLevel(logging.DEBUG)
-    logging.getLogger('socketio.client').setLevel(logging.DEBUG)
+    logging.getLogger("engineio.client").setLevel(logging.DEBUG)
+    logging.getLogger("socketio.client").setLevel(logging.DEBUG)

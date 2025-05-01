@@ -1,8 +1,9 @@
 from typing import TypedDict
 
 ADDRESSES = {
-    'orderbook': '0x05e6f736b5dedd60693fa806ce353156a1b73cf3',
+    "orderbook": "0x05e6f736b5dedd60693fa806ce353156a1b73cf3",
 }
+
 
 class MarketAddresses(TypedDict):
     MON_USDC: str
@@ -11,6 +12,7 @@ class MarketAddresses(TypedDict):
     YAKI_MON: str
     KB_MON: str
     TEST_CHOG_MON: str
+
 
 testnet_market_addresses: MarketAddresses = {
     "MON_USDC": "0xd3af145f1aa1a471b5f0f62c52cf8fcdc9ab55d3",
@@ -21,9 +23,10 @@ testnet_market_addresses: MarketAddresses = {
     "KB_MON": "0x37676650654c9c2c36fcecfaea6172ee1849f9a4",
 }
 
+
 class KuruContractAddresses(TypedDict):
     margin_account: str
-    
+
 
 testnet_kuru_contract_addresses: KuruContractAddresses = {
     "margin_account": "0x4B186949F31FCA0aD08497Df9169a6bEbF0e26ef",

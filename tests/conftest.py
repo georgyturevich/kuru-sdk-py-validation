@@ -8,6 +8,7 @@ from tests.settings import Settings
 # Configure structlog at the very beginning
 configure_logging()
 
+
 @pytest.fixture(scope="session", autouse=True)
 def settings():
     load_dotenv()

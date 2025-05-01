@@ -6,6 +6,7 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
+
 async def run_tasks_in_parallel(
     fn: Callable[..., Any],
     args_list: Optional[List[Tuple[Any, ...]]] = None,
@@ -47,14 +48,13 @@ async def run_tasks_in_parallel(
 
     success = failure = 0
     time_stats = {}  # Dictionary to store timing statistics
-    
+
     async def _async_wrapper(args: Tuple[Any, ...], kwargs: Dict[str, Any]):
 
         log.debug("_async_wrapper before acquire")
         await limiter.wait()
         log.debug("_async_wrapper after acquire")
         return await fn(*args, **kwargs)
-        
 
     promises = [_async_wrapper(args, kwargs) for args, kwargs in zip(args_list, kwargs_list)]
     log.debug("Running parallel tasks", promises=promises)
@@ -64,10 +64,13 @@ async def run_tasks_in_parallel(
         if isinstance(result, Exception):
             failure += 1
             import traceback
-            log.error(f"Exception in parallel task '{result}'; Stacktrace: {"".join(traceback.format_exception(result))} ")
+
+            log.error(
+                f"Exception in parallel task '{result}'; Stacktrace: {"".join(traceback.format_exception(result))} "
+            )
         else:
-            if isinstance(result, dict) and 'cloid' in result and 'duration' in result:
-                time_stats[result['cloid']] = result['duration']
+            if isinstance(result, dict) and "cloid" in result and "duration" in result:
+                time_stats[result["cloid"]] = result["duration"]
             success += 1
 
-    return success, failure, time_stats 
+    return success, failure, time_stats

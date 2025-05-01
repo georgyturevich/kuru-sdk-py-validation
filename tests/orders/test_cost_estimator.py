@@ -8,12 +8,15 @@ from lib.orders.cost_estimator import estimate_required_quote_for_buy
 
 log = structlog.get_logger(__name__)
 
+
 @pytest.mark.asyncio
 async def test_estimate_required_quote_for_buy(settings):
 
     market_orderbook_addr = testnet_market_addresses["TEST_CHOG_MON"]
     orderbook = Orderbook(
-        Web3(Web3.HTTPProvider(settings.full_rpc_url())), market_orderbook_addr, private_key=settings.private_key,
+        Web3(Web3.HTTPProvider(settings.full_rpc_url())),
+        market_orderbook_addr,
+        private_key=settings.private_key,
     )
 
     res = await estimate_required_quote_for_buy(orderbook, 1)

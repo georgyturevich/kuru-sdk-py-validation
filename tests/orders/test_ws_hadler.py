@@ -14,6 +14,7 @@ from lib.constants import testnet_market_addresses
 
 log = structlog.get_logger(__name__)
 
+
 @pytest.mark.asyncio
 async def test_ws_handler():
     load_dotenv()
@@ -37,12 +38,11 @@ async def test_ws_handler():
     except asyncio.CancelledError:
         log.info("Main task cancelled.")
     finally:
-    # Ensure disconnect is called even if there's an error before shutdown_event is awaited
+        # Ensure disconnect is called even if there's an error before shutdown_event is awaited
         if ws_order_controller.shutdown_event and not ws_order_controller.shutdown_event.done():
             log.info("Performing cleanup due to unexpected exit...")
             # await self.ws_client.disconnect()
             log.info("Client disconnected.")
-
 
 
 class WsOrderController:
@@ -72,10 +72,7 @@ class WsOrderController:
                 self.cloid_status[cloid] = "filled"
             else:
                 self.cloid_status[cloid] = "active"
-            self.log.debug("Order details", 
-                       cloid=cloid, 
-                       order=self.client.cloid_to_order[cloid])
-
+            self.log.debug("Order details", cloid=cloid, order=self.client.cloid_to_order[cloid])
 
     def on_trade(self, payload: TradePayload):
         self.log.info("Trade received", payload=payload)
@@ -87,10 +84,7 @@ class WsOrderController:
                 self.cloid_status[cloid] = "filled"
             else:
                 self.cloid_status[cloid] = "partially_filled"
-            self.log.debug("Order updated after trade", 
-                       cloid=cloid, 
-                       order=self.client.cloid_to_order[cloid])
-
+            self.log.debug("Order updated after trade", cloid=cloid, order=self.client.cloid_to_order[cloid])
 
     def on_order_cancelled(self, payload: OrderCancelledPayload):
         cloid = 0
@@ -100,9 +94,7 @@ class WsOrderController:
             if cloid:
                 self.client.cloid_to_order[cloid].is_cancelled = True
                 self.cloid_status[cloid] = "cancelled"
-        self.log.debug("Order details after cancellation", 
-                   cloid=cloid, 
-                   order=self.client.cloid_to_order[cloid])
+        self.log.debug("Order details after cancellation", cloid=cloid, order=self.client.cloid_to_order[cloid])
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()
@@ -119,7 +111,7 @@ class WsOrderController:
             market_params=self.client.orderbook.market_params,
             on_order_created=self.on_order_created,
             on_trade=self.on_trade,
-            on_order_cancelled=self.on_order_cancelled
+            on_order_cancelled=self.on_order_cancelled,
         )
 
         await self.ws_client.connect()
@@ -143,5 +135,3 @@ class WsOrderController:
             loop = asyncio.get_running_loop()
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.remove_signal_handler(sig)
-
-

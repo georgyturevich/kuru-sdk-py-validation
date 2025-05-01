@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 CONFIG_YAML_PATH = Path(__file__).parent.parent / "settings.yaml"
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(yaml_file=CONFIG_YAML_PATH, case_sensitive=False, extra="ignore")
 
@@ -25,9 +26,11 @@ class Settings(BaseSettings):
     # --- Custom Source Loading Order ---
     @classmethod
     def settings_customise_sources(
-        cls, settings_cls: type[BaseSettings], init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource, dotenv_settings: PydanticBaseSettingsSource,
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return init_settings, YamlConfigSettingsSource(settings_cls), env_settings
-

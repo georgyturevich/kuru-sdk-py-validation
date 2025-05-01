@@ -51,7 +51,7 @@ async def estimate_required_quote_for_buy(
     # Iterate through asks starting from the lowest price
     for price, order_size in asks:
         # price and order_size are already floats from get_l2_book
-        
+
         if remaining_base <= 0:
             break
 
@@ -64,5 +64,5 @@ async def estimate_required_quote_for_buy(
             required_quote_tokens += remaining_base * price
             remaining_base = 0
 
-    print (out)
+    print(out)
     return required_quote_tokens
