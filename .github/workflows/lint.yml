@@ -59,12 +59,34 @@ jobs:
 
     - name: Check if any linting step failed
       run: |
-        if [[ "${{ steps.black.outcome }}" == "failure" || \
-              "${{ steps.isort.outcome }}" == "failure" || \
-              "${{ steps.flake8.outcome }}" == "failure" || \
-              "${{ steps.pylint.outcome }}" == "failure" || \
-              "${{ steps.mypy.outcome }}" == "failure" ]]; then
-          echo "One or more linting steps failed"
+        FAILED=false
+
+        if [[ "${{ steps.black.outcome }}" == "failure" ]]; then
+          echo "Black formatting check failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.isort.outcome }}" == "failure" ]]; then
+          echo "Isort import check failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.flake8.outcome }}" == "failure" ]]; then
+          echo "Flake8 linting failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.pylint.outcome }}" == "failure" ]]; then
+          echo "Pylint linting failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.mypy.outcome }}" == "failure" ]]; then
+          echo "Mypy type checking failed"
+          FAILED=true
+        fi
+
+        if [[ "$FAILED" == "true" ]]; then
           exit 1
         else
           echo "All linting steps passed"
