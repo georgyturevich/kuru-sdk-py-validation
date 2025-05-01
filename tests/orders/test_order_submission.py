@@ -13,11 +13,12 @@ from kuru_sdk import MarginAccount, TxOptions
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderCancelledPayload, OrderCreatedPayload, OrderRequest
 from kuru_sdk.websocket_handler import WebSocketHandler
+from rlp.sedes import boolean
 from web3 import AsyncHTTPProvider, AsyncWeb3
 
 from lib import constants
 from lib.utils.parallel import run_tasks_in_parallel
-from tests.orders.helpers import print_order_detailed_stats, print_ws_stats, print_individual_orders_stats
+from tests.orders.helpers import print_individual_orders_stats, print_order_detailed_stats, print_ws_stats
 from tests.settings import Settings
 
 log = structlog.get_logger(__name__)
@@ -190,6 +191,19 @@ async def create_limit_buy_order(
     return {"cloid": cloid, "duration": duration}
 
 
+async def cancel_order(client: ClientOrderExecutor, order_id: int):
+    start_time = time.time()
+    tx_hash = await client.cancel_orders(order_ids=[order_id])
+    duration = time.time() - start_time
+
+    assert tx_hash is not None
+    assert len(tx_hash) > 0
+    cloid = client.order_id_to_cloid[order_id]
+    log.info("Order cancelled", tx_hash=tx_hash, order_id=order_id, duration=f"{duration:.4f}", cloid=cloid)
+
+    return {"cloid": cloid, "duration": duration}
+
+
 async def add_margin_balance(web3: AsyncWeb3, price: str, size: str, num_orders: int, private_key: str):
     margin_account = MarginAccount(
         web3=web3, contract_address=constants.testnet_kuru_contract_addresses["margin_account"], private_key=private_key
@@ -252,17 +266,37 @@ class WsOrderTester:
         if payload.owner != self.client.wallet_address:
             return
 
-        log.info("WebSocket OrderCreated event received", tx_hash=payload.transaction_hash)
+        log.info("WebSocket OrderCreated event received", payload=payload)
         # Record the receipt time
-        receipt_time = time.time()
-        tx_hash = payload.transaction_hash
+        found = self.save_order_created_timing_info(payload)
 
+        # Cancel the order
+        assert self.client is not None
+        result = await cancel_order(self.client, payload.order_id)
+        log.info("Order canceled", result=result)
+
+        if found:
+            # Increment received events counter and check if all events received
+            self.received_events += 1
+            if self.received_events >= self.expected_events:
+                self.all_events_received.set()
+
+        # Record the cancellation time
+        # self.save_order_cancelled_timing_info(result)
+
+    def save_order_cancelled_timing_info(self, result):
+        receipt_time = time.time()
+        tx_hash = result["tx_hash"]
         # Normalize tx_hash by removing '0x' prefix if present
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
 
-        self.log.info("WebSocket event: Order created", payload=payload)
-
+    def save_order_created_timing_info(self, payload) -> boolean:
+        receipt_time = time.time()
+        tx_hash = payload.transaction_hash
+        # Normalize tx_hash by removing '0x' prefix if present
+        if tx_hash.startswith("0x"):
+            tx_hash = tx_hash[2:]
         # Record the WebSocket event time if we have this transaction
         if tx_hash in self.order_times:
             order_info = self.order_times[tx_hash]
@@ -286,15 +320,16 @@ class WsOrderTester:
                 total_delay=f"{total_delay:.4f}",
             )
 
-            # Increment received events counter and check if all events received
-            self.received_events += 1
-            if self.received_events >= self.expected_events:
-                self.all_events_received.set()
+            return True
+
+        return False
 
     async def on_order_cancelled(self, payload: OrderCancelledPayload):
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
-            self.log.info("WebSocket event: Order cancelled", order_id=order_id)
+            self.log.info(
+                "WebSocket event: Order canceled", order_id=order_id, cloid=self.client.order_id_to_cloid[order_id]
+            )
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()

@@ -4,6 +4,7 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
+
 def print_individual_orders_stats(success_count, time_stats, total_duration):
     # Print detailed time statistics for individual orders
     if time_stats:
