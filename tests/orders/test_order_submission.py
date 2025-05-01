@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional, TypedDict
 
 import pytest
 import structlog
-from dotenv import load_dotenv
 from eth_typing import HexStr
 from eth_utils.currency import from_wei, to_wei
 from kuru_sdk import MarginAccount, TxOptions
@@ -87,7 +86,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
                 "client": client,
                 "price": price,
                 "size": size,
-                "cloid": f"mm_{i+1}",
+                "cloid": f"mm_{i + 1}",
                 "nonce": base_nonce + i,
                 "private_key": settings.private_key,
                 "ws_order_tester": ws_order_tester,  # Pass the WebSocket tester to track submission times
