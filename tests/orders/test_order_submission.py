@@ -1,24 +1,24 @@
 import asyncio
 import math
 import signal
-import time
 import statistics
-from typing import Optional, Dict, Any, TypedDict
+import time
+from typing import Any, Dict, Optional, TypedDict
 
-from dotenv import load_dotenv
 import pytest
 import structlog
+from dotenv import load_dotenv
 from eth_typing import HexStr
 from eth_utils.currency import from_wei, to_wei
 from kuru_sdk import MarginAccount, TxOptions
 from kuru_sdk.client_order_executor import ClientOrderExecutor
-from kuru_sdk.types import OrderRequest, OrderCreatedPayload, OrderCancelledPayload
+from kuru_sdk.types import OrderCancelledPayload, OrderCreatedPayload, OrderRequest
 from kuru_sdk.websocket_handler import WebSocketHandler
-from web3 import AsyncWeb3, AsyncHTTPProvider
+from web3 import AsyncHTTPProvider, AsyncWeb3
 
 from lib import constants
-from tests.settings import Settings
 from lib.utils.parallel import run_tasks_in_parallel
+from tests.settings import Settings
 
 log = structlog.get_logger(__name__)
 

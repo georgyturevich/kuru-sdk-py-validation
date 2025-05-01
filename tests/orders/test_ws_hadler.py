@@ -6,7 +6,7 @@ import pytest
 import structlog
 from dotenv import load_dotenv
 from kuru_sdk import ClientOrderExecutor
-from kuru_sdk.types import OrderCreatedPayload, TradePayload, OrderCancelledPayload
+from kuru_sdk.types import OrderCancelledPayload, OrderCreatedPayload, TradePayload
 from kuru_sdk.websocket_handler import WebSocketHandler
 from web3 import Web3
 

@@ -1,6 +1,5 @@
 from typing import TypedDict
 
-
 ADDRESSES = {
     'orderbook': '0x05e6f736b5dedd60693fa806ce353156a1b73cf3',
 }

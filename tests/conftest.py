@@ -1,8 +1,9 @@
 import pytest
 from dotenv import load_dotenv
 from pydantic import ValidationError
-from tests.settings import Settings
+
 from lib.utils import configure_logging
+from tests.settings import Settings
 
 # Configure structlog at the very beginning
 configure_logging()

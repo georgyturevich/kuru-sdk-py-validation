@@ -1,8 +1,9 @@
 import os
-import pytest
 import time
 from datetime import datetime, timedelta
+
 import kuru_sdk.api as KuruAPI
+import pytest
 from dotenv import load_dotenv
 
 from lib.constants import testnet_market_addresses

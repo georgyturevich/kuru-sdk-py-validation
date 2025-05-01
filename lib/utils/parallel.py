@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 import asynciolimiter
 import structlog

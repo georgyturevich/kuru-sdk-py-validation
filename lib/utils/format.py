@@ -1,6 +1,7 @@
-from datetime import datetime
 from dataclasses import fields
-from kuru_sdk.types import Order, MarketParams
+from datetime import datetime
+
+from kuru_sdk.types import MarketParams, Order
 
 
 def format_orders_list_payload(payload) -> list[Order]:

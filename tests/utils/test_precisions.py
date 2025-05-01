@@ -1,6 +1,8 @@
+import math
+
 import pytest
 from kuru_sdk.types import MarketParams
-import math
+
 
 @pytest.fixture
 def market_params():

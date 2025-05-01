@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime
 
 from kuru_sdk.types import Order
+
 from lib.utils.format import format_orders_list_payload
 
 
