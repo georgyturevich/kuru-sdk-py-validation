@@ -424,7 +424,7 @@ async def test_clear_margin_account_balance(settings: Settings):
     )
 
     # Clear the margin account balance
-    balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
+    balance = await margin_account.get_balance(str(margin_account.wallet_address), margin_account.NATIVE)
     log.info("Clearing margin account balance", balance=f"{from_wei(balance, 'ether')} MON")
     if balance > 0:
         tx_hash = await margin_account.withdraw(margin_account.NATIVE, balance)
@@ -435,6 +435,6 @@ async def test_clear_margin_account_balance(settings: Settings):
         receipt = await web3.eth.wait_for_transaction_receipt(HexStr(tx_hash))
         assert receipt["status"] == 1
 
-        balance = await margin_account.get_balance(margin_account.wallet_address, margin_account.NATIVE)
+        balance = await margin_account.get_balance(str(margin_account.wallet_address), margin_account.NATIVE)
         log.info("New margin account balance", balance=f"{from_wei(balance, 'ether')} MON")
         assert balance == 0
