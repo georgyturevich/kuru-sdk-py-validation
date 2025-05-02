@@ -1,7 +1,6 @@
 import asyncio
 import math
 import signal
-import statistics
 import time
 from typing import Any, Dict, Optional, TypedDict
 
@@ -13,12 +12,19 @@ from kuru_sdk import MarginAccount, TxOptions
 from kuru_sdk.client_order_executor import ClientOrderExecutor
 from kuru_sdk.types import OrderCancelledPayload, OrderCreatedPayload, OrderRequest
 from kuru_sdk.websocket_handler import WebSocketHandler
-from rlp.sedes import boolean
 from web3 import AsyncHTTPProvider, AsyncWeb3
 
 from lib import constants
+from lib.client_extensions import get_next_nonce
 from lib.utils.parallel import run_tasks_in_parallel
-from tests.orders.helpers import print_individual_orders_stats, print_order_detailed_stats, print_ws_stats
+from tests.orders.helpers import (
+    prepare_order_details_statistics,
+    prepare_ws_delay_statistics,
+    print_cancel_order_stats,
+    print_individual_orders_stats,
+    print_order_detailed_stats,
+    print_ws_stats,
+)
 from tests.settings import Settings
 
 log = structlog.get_logger(__name__)
@@ -74,12 +80,11 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 2  # Increased from 1 to get more meaningful statistics
+    num_orders = 20  # Increased from 1 to get more meaningful statistics
 
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
     # Build list of kwargs for each order
-    base_nonce = await web3.eth.get_transaction_count(web3.eth.account.from_key(settings.private_key).address)
     tasks_kwargs = []
     for i in range(num_orders):
         tasks_kwargs.append(
@@ -89,8 +94,6 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
                 "price": price,
                 "size": size,
                 "cloid": f"mm_{i + 1}",
-                "nonce": base_nonce + i,
-                "private_key": settings.private_key,
                 "ws_order_tester": ws_order_tester,  # Pass the WebSocket tester to track submission times
             }
         )
@@ -120,7 +123,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
         received_events=ws_order_tester.received_events,
     )
     try:
-        await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=30)
+        await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
         log.info("All WebSocket events received", event_count=ws_order_tester.received_events)
     except asyncio.TimeoutError:
         log.warning(
@@ -133,6 +136,8 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
 
     print_ws_stats(ws_order_tester)
 
+    print_cancel_order_stats(ws_order_tester.get_cancel_order_stats())
+
     print_individual_orders_stats(success_count, time_stats, total_duration)
 
     await ws_order_tester.shutdown(signal.SIGINT)
@@ -140,11 +145,13 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     assert success_count == num_orders, "Incorrect number of orders placed"
 
 
-async def create_limit_buy_order(
-    web3, client: ClientOrderExecutor, price, size, cloid, nonce: int, private_key: str, ws_order_tester=None
-):
+async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, ws_order_tester=None):
     # Start time tracking for order initiation
     start_time = time.time()
+
+    # Use the client extension function to get the next nonce if not provided
+
+    nonce = await get_next_nonce(client)
 
     market_address = constants.testnet_market_addresses["TEST_CHOG_MON"]
 
@@ -192,13 +199,20 @@ async def create_limit_buy_order(
 
 
 async def cancel_order(client: ClientOrderExecutor, order_id: int):
+    cloid = client.order_id_to_cloid[order_id]
+
+    log.info("Cancelling order ...", order_id=order_id, cloid=cloid)
+
+    # Use get_next_nonce function from client_extensions
+    nonce = await get_next_nonce(client)
+    tx_options = TxOptions(nonce=nonce)
+
     start_time = time.time()
-    tx_hash = await client.cancel_orders(order_ids=[order_id])
+    tx_hash = await client.cancel_orders(order_ids=[order_id], tx_options=tx_options)
     duration = time.time() - start_time
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
-    cloid = client.order_id_to_cloid[order_id]
     log.info("Order cancelled", tx_hash=tx_hash, order_id=order_id, duration=f"{duration:.4f}", cloid=cloid)
 
     return {"cloid": cloid, "duration": duration}
@@ -253,6 +267,9 @@ class WsOrderTester:
         # Event to signal when all expected events have been received
         self.all_events_received = asyncio.Event()
 
+        # Dictionary to store cancel order timings
+        self.cancel_order_times = {}
+
     def add_order_tx(self, tx_hash: str, start_time: float, end_time: float, cloid: str):
         """Record the times for an order by transaction hash"""
         # Normalize tx_hash by removing '0x' prefix if present
@@ -263,35 +280,46 @@ class WsOrderTester:
         self.expected_events += 1
 
     async def on_order_created(self, payload: OrderCreatedPayload):
-        if payload.owner != self.client.wallet_address:
+        if self.client is None or payload.owner != self.client.wallet_address:
             return
 
-        log.info("WebSocket OrderCreated event received", payload=payload)
-        # Record the receipt time
-        found = self.save_order_created_timing_info(payload)
+        try:
+            log.info("WebSocket OrderCreated event received", payload=payload)
+            # Record the receipt time
+            found = self.save_order_created_timing_info(payload)
 
-        # Cancel the order
-        assert self.client is not None
-        result = await cancel_order(self.client, payload.order_id)
-        log.info("Order canceled", result=result)
+            # Cancel the order
+            assert self.client is not None
+            result = await cancel_order(self.client, payload.order_id)
+            log.info("Order cancelled", result=result)
 
-        if found:
-            # Increment received events counter and check if all events received
-            self.received_events += 1
-            if self.received_events >= self.expected_events:
-                self.all_events_received.set()
+            # Record the cancellation time
+            self.save_order_cancelled_timing_info(result)
 
-        # Record the cancellation time
-        # self.save_order_cancelled_timing_info(result)
+            if found:
+                # Increment received events counter and check if all events received
+                self.received_events += 1
+                if self.received_events >= self.expected_events:
+                    self.all_events_received.set()
+        except Exception as e:
+            log.error("Error processing on_order_created WebSocket event", error=str(e))
+            log.exception(e)
+            raise e
 
     def save_order_cancelled_timing_info(self, result):
-        receipt_time = time.time()
-        tx_hash = result["tx_hash"]
-        # Normalize tx_hash by removing '0x' prefix if present
-        if tx_hash.startswith("0x"):
-            tx_hash = tx_hash[2:]
+        cloid = result["cloid"]
+        duration = result["duration"]
 
-    def save_order_created_timing_info(self, payload) -> boolean:
+        # Store the cancellation time
+        self.cancel_order_times[cloid] = duration
+
+        self.log.info(
+            "Order cancellation timing",
+            cloid=cloid,
+            duration=f"{duration:.4f}",
+        )
+
+    def save_order_created_timing_info(self, payload) -> bool:
         receipt_time = time.time()
         tx_hash = payload.transaction_hash
         # Normalize tx_hash by removing '0x' prefix if present
@@ -328,7 +356,7 @@ class WsOrderTester:
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
             self.log.info(
-                "WebSocket event: Order canceled", order_id=order_id, cloid=self.client.order_id_to_cloid[order_id]
+                "WebSocket event: Order cancelled", order_id=order_id, cloid=self.client.order_id_to_cloid[order_id]
             )
 
     async def initialize(self):
@@ -370,83 +398,22 @@ class WsOrderTester:
 
     def get_delay_statistics(self):
         """Calculate statistics about the WebSocket event delays"""
-        if not self.order_times:
+        order_times = self.order_times
+        if not order_times:
             return None
 
-        # Collect delays for orders that have received WebSocket events
-        tx_to_ws_delays = []
-        order_to_tx_delays = []
-        total_delays = []
-
-        for tx_hash, times in self.order_times.items():
-            if "ws_time" in times:
-                start_time = float(times["start_time"])
-                end_time = float(times["end_time"])
-                ws_time = float(times["ws_time"])
-
-                tx_to_ws_delay = ws_time - end_time
-                order_to_tx_delay = end_time - start_time
-                total_delay = ws_time - start_time
-
-                tx_to_ws_delays.append(tx_to_ws_delay)
-                order_to_tx_delays.append(order_to_tx_delay)
-                total_delays.append(total_delay)
-
-        if not tx_to_ws_delays:
-            return None
-
-        stats = {
-            "count": len(tx_to_ws_delays),
-            "tx_to_ws": {
-                "min": min(tx_to_ws_delays),
-                "max": max(tx_to_ws_delays),
-                "mean": statistics.mean(tx_to_ws_delays),
-                "median": statistics.median(tx_to_ws_delays),
-            },
-            "order_to_tx": {
-                "min": min(order_to_tx_delays),
-                "max": max(order_to_tx_delays),
-                "mean": statistics.mean(order_to_tx_delays),
-                "median": statistics.median(order_to_tx_delays),
-            },
-            "total": {
-                "min": min(total_delays),
-                "max": max(total_delays),
-                "mean": statistics.mean(total_delays),
-                "median": statistics.median(total_delays),
-            },
-        }
-
-        if len(tx_to_ws_delays) > 1:
-            stats["tx_to_ws"]["std_dev"] = statistics.stdev(tx_to_ws_delays)
-            stats["order_to_tx"]["std_dev"] = statistics.stdev(order_to_tx_delays)
-            stats["total"]["std_dev"] = statistics.stdev(total_delays)
-
-        return stats
+        return prepare_ws_delay_statistics(order_times)
 
     def get_order_details(self):
         """Get detailed order timing information for each order"""
-        result = []
 
-        for tx_hash, times in self.order_times.items():
-            if "ws_time" in times:
-                start_time = float(times["start_time"])
-                end_time = float(times["end_time"])
-                ws_time = float(times["ws_time"])
+        order_times = self.order_times
 
-                record = {
-                    "cloid": times["cloid"],
-                    "tx_hash": tx_hash,
-                    "initiation_time": start_time,
-                    "completion_time": end_time,
-                    "ws_event_time": ws_time,
-                    "order_execution_duration": end_time - start_time,
-                    "ws_event_delay": ws_time - end_time,
-                    "total_duration": ws_time - start_time,
-                }
-                result.append(record)
+        return prepare_order_details_statistics(order_times)
 
-        return sorted(result, key=lambda x: x["cloid"])
+    def get_cancel_order_stats(self):
+        """Return the dictionary of cancel order timings for statistics"""
+        return self.cancel_order_times
 
 
 @pytest.mark.asyncio
