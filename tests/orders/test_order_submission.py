@@ -32,7 +32,7 @@ log = structlog.get_logger(__name__)
 
 
 @pytest.mark.asyncio
-async def test_example_place_order(settings: Settings, rate_limit=4):
+async def test_single_orders_submission_and_cancelling(settings: Settings, rate_limit=4):
     """
     Test placing multiple limit buy orders with rate limiting.
 
