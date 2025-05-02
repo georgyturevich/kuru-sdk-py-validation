@@ -72,7 +72,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 2  # Increased from 1 to get more meaningful statistics
+    num_orders = 20  # Increased from 1 to get more meaningful statistics
 
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
@@ -112,15 +112,15 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     log.info(
         "Waiting for WebSocket events",
         expected_events=ws_order_tester.expected_events,
-        received_events=ws_order_tester.received_events,
+        received_events=ws_order_tester.received_order_cancel_ws_events,
     )
     try:
         await asyncio.wait_for(ws_order_tester.all_events_received.wait(), timeout=60)
-        log.info("All WebSocket events received", event_count=ws_order_tester.received_events)
+        log.info("All WebSocket events received", event_count=ws_order_tester.received_order_cancel_ws_events)
     except asyncio.TimeoutError:
         log.warning(
             "Timeout waiting for WebSocket events",
-            received=ws_order_tester.received_events,
+            received=ws_order_tester.received_order_cancel_ws_events,
             expected=ws_order_tester.expected_events,
         )
 
@@ -135,6 +135,12 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     await ws_order_tester.shutdown(signal.SIGINT)
 
     assert success_count == num_orders, "Incorrect number of orders placed"
+    assert (
+        ws_order_tester.received_order_create_ws_events == num_orders
+    ), "Incorrect number of WebSocket CreateOrder events received"
+    assert (
+        ws_order_tester.received_order_cancel_ws_events == num_orders
+    ), "Incorrect number of WebSocket CancelOrder events received"
 
 
 async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, ws_order_tester=None):
@@ -261,7 +267,8 @@ class WsOrderTester:
 
         # Track number of expected and received events
         self.expected_events = 0
-        self.received_events = 0
+        self.received_order_create_ws_events = 0
+        self.received_order_cancel_ws_events = 0
 
         # Event to signal when all expected events have been received
         self.all_events_received = asyncio.Event()
@@ -290,15 +297,14 @@ class WsOrderTester:
             log.info("WebSocket OrderCreated event received", payload=payload)
             found = self.save_ws_event_order_created_timing_info(payload)
 
-            assert self.client is not None
-            result = await cancel_order(self.client, payload.order_id)
-
-            self.save_order_cancelled_timing_info(result)
-
             if found:
-                self.received_events += 1
-                if self.received_events >= self.expected_events:
-                    self.all_events_received.set()
+
+                assert self.client is not None
+                result = await cancel_order(self.client, payload.order_id)
+
+                self.save_order_cancelled_timing_info(result)
+
+                self.received_order_create_ws_events += 1
         except Exception as e:
             log.error("Error processing on_order_created WebSocket event", error=str(e))
             log.exception(e)
@@ -350,7 +356,7 @@ class WsOrderTester:
             total_delay = receipt_time - start_time
 
             self.log.info(
-                "WebSocket event timing",
+                "WebSocket event: Order Created",
                 cloid=cloid,
                 tx_hash=order_info.create_tx_hash,
                 order_init_to_completion=f"{start_to_end:.4f}",
@@ -363,7 +369,7 @@ class WsOrderTester:
         return False
 
     async def on_order_cancelled(self, payload: OrderCancelledPayload):
-        # Fix to access order_ids instead of owner property
+        self.log.info("WebSocket OrderCancelled event received", payload=payload)
         for order_id in payload.order_ids:
             self.save_ws_event_single_order_cancelled(order_id)
 
@@ -383,6 +389,11 @@ class WsOrderTester:
         self.log.info(
             "WebSocket event: Order cancelled", order_id=order_id, cloid=cloid, ws_receipt_time=f"{ws_receipt_time:.4f}"
         )
+
+        self.received_order_cancel_ws_events += 1
+        if self.received_order_cancel_ws_events >= self.expected_events:
+            self.all_events_received.set()
+        return None
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()

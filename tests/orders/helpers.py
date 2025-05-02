@@ -96,7 +96,7 @@ def prepare_ws_delay_statistics(order_times: Dict[str, OrderTimingInfo]):
     total_delays = []
 
     stats = None
-    for tx_hash, order_info in order_times.items():
+    for _, order_info in order_times.items():
         if order_info.ws_time:
             start_time = float(order_info.start_time)
             end_time = float(order_info.end_time)
@@ -141,7 +141,7 @@ def prepare_ws_delay_statistics(order_times: Dict[str, OrderTimingInfo]):
 
 def prepare_order_details_statistics(order_times: Dict[str, OrderTimingInfo]):
     result = []
-    for tx_hash, order_info in order_times.items():
+    for cloid, order_info in order_times.items():
         if order_info.ws_time:
             start_time = float(order_info.start_time)
             end_time = float(order_info.end_time)
@@ -149,13 +149,18 @@ def prepare_order_details_statistics(order_times: Dict[str, OrderTimingInfo]):
 
             record = {
                 "cloid": order_info.cloid,
-                "tx_hash": tx_hash,
+                "tx_hash": order_info.create_tx_hash[:10] if order_info.create_tx_hash else "",
                 "initiation_time": start_time,
                 "completion_time": end_time,
                 "ws_event_time": ws_time,
                 "order_execution_duration": end_time - start_time,
                 "ws_event_delay": ws_time - end_time,
                 "total_duration": ws_time - start_time,
+                "cancel_tx_hash": order_info.cancel_tx_hash[:10] if order_info.cancel_tx_hash else "",
+                "cancel_start_time": order_info.cancel_start_time,
+                "cancel_end_time": order_info.cancel_end_time,
+                "cancel_duration": order_info.cancel_duration,
+                "ws_cancel_event_time": order_info.ws_cancel_event_time,
             }
             result.append(record)
     return sorted(result, key=lambda x: x["cloid"])
@@ -165,9 +170,10 @@ def print_order_detailed_stats(order_details):
     # Print detailed order statistics
     print("\n--- Detailed Order Statistics ---")
     print(
-        f"{'CLOID':<10} {'TX Hash':<12} {'Init(rel)':<10} {'Complete(rel)':<15} {'WS Event':<10} {'Duration':<10} {'WS Delay':<10} {'Total':<10}"
+        f"{'CLOID':<10} {'TX Hash':<12} {'Init(rel)':<10} {'Complete(rel)':<15} {'WS Event(rel)':<15} {'Duration':<10} {'WS Delay':<10} {'Total':<10} "
+        f"{'Cancel TX':<12} {'CnclStrt(rel)':<11} {'CnclEnd(rl)':<15} {'CnclDur':<10} {'WSCncl(rl)':<11} {'WSCnclDel':<10}"
     )
-    print("-" * 115)
+    print("-" * 205)
     start_reference = min([order["initiation_time"] for order in order_details]) if order_details else 0
     for order in order_details:
         # Normalize timestamps relative to the first order
@@ -175,8 +181,23 @@ def print_order_detailed_stats(order_details):
         complete_rel = order["completion_time"] - start_reference
         ws_rel = order["ws_event_time"] - start_reference
 
+        # Calculate cancellation relative times
+        cancel_start_rel = order["cancel_start_time"] - start_reference if order["cancel_start_time"] > 0 else 0
+        cancel_end_rel = order["cancel_end_time"] - start_reference if order["cancel_end_time"] > 0 else 0
+        ws_cancel_rel = order["ws_cancel_event_time"] - start_reference if order["ws_cancel_event_time"] > 0 else 0
+
+        # Calculate WS cancel delay
+        ws_cancel_delay = (
+            order["ws_cancel_event_time"] - order["cancel_end_time"]
+            if order["ws_cancel_event_time"] > 0 and order["cancel_end_time"] > 0
+            else 0
+        )
+
         print(
-            f"{order['cloid']:<10} {order['tx_hash'][:10]:<12} {init_rel:.4f}{'':>4} {complete_rel:.4f}{'':>9} {ws_rel:.4f}{'':>4} {order['order_execution_duration']:.4f}{'':>4} {order['ws_event_delay']:.4f}{'':>4} {order['total_duration']:.4f}"
+            f"{order['cloid']:<10} {order['tx_hash'][:10]:<12} {init_rel:.4f}{'':>4} {complete_rel:.4f}{'':>9} {ws_rel:.4f}{'':>9} "
+            f"{order['order_execution_duration']:.4f}{'':>4} {order['ws_event_delay']:.4f}{'':>4} {order['total_duration']:.4f}{'':>4} "
+            f"{order['cancel_tx_hash']:<12} {cancel_start_rel:.4f}{'':>7} {cancel_end_rel:.4f}{'':>9} {order['cancel_duration']:.4f}{'':>5} "
+            f"{ws_cancel_rel:.4f}{'':>5} {ws_cancel_delay:.4f}{'':>5}"
         )
 
 
