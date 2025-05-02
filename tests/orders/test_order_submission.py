@@ -2,7 +2,7 @@ import asyncio
 import math
 import signal
 import time
-from typing import Any, Dict, Optional, TypedDict
+from typing import Dict, Optional
 
 import pytest
 import structlog
@@ -18,6 +18,7 @@ from lib import constants
 from lib.client_extensions import get_next_nonce
 from lib.utils.parallel import run_tasks_in_parallel
 from tests.orders.helpers import (
+    OrderTimingInfo,
     prepare_order_details_statistics,
     prepare_ws_delay_statistics,
     print_cancel_order_stats,
@@ -28,15 +29,6 @@ from tests.orders.helpers import (
 from tests.settings import Settings
 
 log = structlog.get_logger(__name__)
-
-
-class OrderTimingInfo(TypedDict):
-    """Type definition for order timing information"""
-
-    start_time: float
-    end_time: float
-    cloid: str
-    ws_time: float  # Optional in actual usage, but required in TypedDict
 
 
 @pytest.mark.asyncio
@@ -80,7 +72,7 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
     price = "0.00000284"
     size = "10000"
 
-    num_orders = 20  # Increased from 1 to get more meaningful statistics
+    num_orders = 2  # Increased from 1 to get more meaningful statistics
 
     await add_margin_balance(web3, price, size, num_orders, settings.private_key)
 
@@ -132,9 +124,9 @@ async def test_example_place_order(settings: Settings, rate_limit=4):
             expected=ws_order_tester.expected_events,
         )
 
-    print_order_detailed_stats(ws_order_tester)
+    print_order_detailed_stats(ws_order_tester.get_order_details())
 
-    print_ws_stats(ws_order_tester)
+    print_ws_stats(ws_order_tester.get_delay_statistics())
 
     print_cancel_order_stats(ws_order_tester.get_cancel_order_stats())
 
@@ -209,13 +201,20 @@ async def cancel_order(client: ClientOrderExecutor, order_id: int):
 
     start_time = time.time()
     tx_hash = await client.cancel_orders(order_ids=[order_id], tx_options=tx_options)
-    duration = time.time() - start_time
+    end_time = time.time()
+    duration = end_time - start_time
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
     log.info("Order cancelled", tx_hash=tx_hash, order_id=order_id, duration=f"{duration:.4f}", cloid=cloid)
 
-    return {"cloid": cloid, "duration": duration}
+    return {
+        "cloid": cloid,
+        "cancel_duration": duration,
+        "cancel_start_time": start_time,
+        "cancel_end_time": end_time,
+        "cancel_tx_hash": tx_hash,
+    }
 
 
 async def add_margin_balance(web3: AsyncWeb3, price: str, size: str, num_orders: int, private_key: str):
@@ -258,7 +257,7 @@ class WsOrderTester:
         self.shutdown_event: asyncio.Future[bool] | None = None
 
         # Dictionary to track order times by transaction hash
-        self.order_times: Dict[str, Dict[str, Any]] = {}
+        self.order_times: Dict[str, OrderTimingInfo] = {}
 
         # Track number of expected and received events
         self.expected_events = 0
@@ -276,7 +275,11 @@ class WsOrderTester:
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
 
-        self.order_times[tx_hash] = {"start_time": start_time, "end_time": end_time, "cloid": cloid}
+        order_timing_info = OrderTimingInfo(
+            start_time=start_time, end_time=end_time, cloid=cloid, create_tx_hash=tx_hash
+        )
+
+        self.order_times[cloid] = order_timing_info
         self.expected_events += 1
 
     async def on_order_created(self, payload: OrderCreatedPayload):
@@ -285,19 +288,14 @@ class WsOrderTester:
 
         try:
             log.info("WebSocket OrderCreated event received", payload=payload)
-            # Record the receipt time
-            found = self.save_order_created_timing_info(payload)
+            found = self.save_ws_event_order_created_timing_info(payload)
 
-            # Cancel the order
             assert self.client is not None
             result = await cancel_order(self.client, payload.order_id)
-            log.info("Order cancelled", result=result)
 
-            # Record the cancellation time
             self.save_order_cancelled_timing_info(result)
 
             if found:
-                # Increment received events counter and check if all events received
                 self.received_events += 1
                 if self.received_events >= self.expected_events:
                     self.all_events_received.set()
@@ -308,32 +306,44 @@ class WsOrderTester:
 
     def save_order_cancelled_timing_info(self, result):
         cloid = result["cloid"]
-        duration = result["duration"]
-
+        duration = result["cancel_duration"]
         # Store the cancellation time
-        self.cancel_order_times[cloid] = duration
+        # self.cancel_order_times[cloid] = duration
+
+        assert cloid in self.order_times
+
+        order_info = self.order_times[cloid]
+        order_info.cancel_duration = duration
+        order_info.cancel_start_time = result["cancel_start_time"]
+        order_info.cancel_end_time = result["cancel_end_time"]
+        order_info.cancel_tx_hash = result["cancel_tx_hash"]
 
         self.log.info(
             "Order cancellation timing",
             cloid=cloid,
             duration=f"{duration:.4f}",
+            cancel_start_time=f"{order_info.cancel_start_time:.4f}",
+            cancel_end_time=f"{order_info.cancel_end_time:.4f}",
+            cancel_tx_hash=order_info.cancel_tx_hash,
         )
 
-    def save_order_created_timing_info(self, payload) -> bool:
+    def save_ws_event_order_created_timing_info(self, payload: OrderCreatedPayload) -> bool:
+        assert self.client is not None
+        cloid = self.client.order_id_to_cloid[payload.order_id]
         receipt_time = time.time()
         tx_hash = payload.transaction_hash
         # Normalize tx_hash by removing '0x' prefix if present
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
         # Record the WebSocket event time if we have this transaction
-        if tx_hash in self.order_times:
-            order_info = self.order_times[tx_hash]
-            order_info["ws_time"] = receipt_time
-            cloid = order_info["cloid"]
+        if cloid in self.order_times:
+            order_info = self.order_times[cloid]
+            order_info.ws_time = receipt_time
+            cloid = order_info.cloid
 
             # Calculate delays
-            start_time = float(order_info["start_time"])
-            end_time = float(order_info["end_time"])
+            start_time = float(order_info.start_time)
+            end_time = float(order_info.end_time)
 
             start_to_end = end_time - start_time
             end_to_ws = receipt_time - end_time
@@ -342,7 +352,7 @@ class WsOrderTester:
             self.log.info(
                 "WebSocket event timing",
                 cloid=cloid,
-                tx_hash=tx_hash,
+                tx_hash=order_info.create_tx_hash,
                 order_init_to_completion=f"{start_to_end:.4f}",
                 order_completion_to_ws=f"{end_to_ws:.4f}",
                 total_delay=f"{total_delay:.4f}",
@@ -355,9 +365,24 @@ class WsOrderTester:
     async def on_order_cancelled(self, payload: OrderCancelledPayload):
         # Fix to access order_ids instead of owner property
         for order_id in payload.order_ids:
-            self.log.info(
-                "WebSocket event: Order cancelled", order_id=order_id, cloid=self.client.order_id_to_cloid[order_id]
-            )
+            self.save_ws_event_single_order_cancelled(order_id)
+
+    def save_ws_event_single_order_cancelled(self, order_id):
+        assert self.client is not None
+
+        if order_id not in self.client.order_id_to_cloid:
+            self.log.warning("Order not found", order_id=order_id)
+            return None
+
+        cloid = self.client.order_id_to_cloid[order_id]
+
+        ws_receipt_time = time.time()
+        order_info = self.order_times[cloid]
+        order_info.ws_cancel_event_time = ws_receipt_time
+
+        self.log.info(
+            "WebSocket event: Order cancelled", order_id=order_id, cloid=cloid, ws_receipt_time=f"{ws_receipt_time:.4f}"
+        )
 
     async def initialize(self):
         self.shutdown_event = asyncio.Future()

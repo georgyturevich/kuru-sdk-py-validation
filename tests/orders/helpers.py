@@ -1,8 +1,27 @@
 import statistics
+from dataclasses import dataclass
+from typing import Dict
 
 import structlog
 
 log = structlog.get_logger(__name__)
+
+
+@dataclass
+class OrderTimingInfo:
+    """Type definition for order timing information"""
+
+    start_time: float
+    end_time: float
+    cloid: str
+    create_tx_hash: str
+    ws_time: float = 0.0
+
+    cancel_start_time: float = 0.0
+    cancel_end_time: float = 0.0
+    cancel_duration: float = 0.0
+    cancel_tx_hash: str = ""
+    ws_cancel_event_time: float = 0.0
 
 
 def print_individual_orders_stats(success_count, time_stats, total_duration):
@@ -70,18 +89,18 @@ def print_cancel_order_stats(cancel_stats):
         print(f"Standard deviation: {std_dev:.4f} seconds")
 
 
-def prepare_ws_delay_statistics(order_times):
+def prepare_ws_delay_statistics(order_times: Dict[str, OrderTimingInfo]):
     # Collect delays for orders that have received WebSocket events
     tx_to_ws_delays = []
     order_to_tx_delays = []
     total_delays = []
 
     stats = None
-    for tx_hash, times in order_times.items():
-        if "ws_time" in times:
-            start_time = float(times["start_time"])
-            end_time = float(times["end_time"])
-            ws_time = float(times["ws_time"])
+    for tx_hash, order_info in order_times.items():
+        if order_info.ws_time:
+            start_time = float(order_info.start_time)
+            end_time = float(order_info.end_time)
+            ws_time = float(order_info.ws_time)
 
             tx_to_ws_delay = ws_time - end_time
             order_to_tx_delay = end_time - start_time
@@ -120,16 +139,16 @@ def prepare_ws_delay_statistics(order_times):
     return stats
 
 
-def prepare_order_details_statistics(order_times):
+def prepare_order_details_statistics(order_times: Dict[str, OrderTimingInfo]):
     result = []
-    for tx_hash, times in order_times.items():
-        if "ws_time" in times:
-            start_time = float(times["start_time"])
-            end_time = float(times["end_time"])
-            ws_time = float(times["ws_time"])
+    for tx_hash, order_info in order_times.items():
+        if order_info.ws_time:
+            start_time = float(order_info.start_time)
+            end_time = float(order_info.end_time)
+            ws_time = float(order_info.ws_time)
 
             record = {
-                "cloid": times["cloid"],
+                "cloid": order_info.cloid,
                 "tx_hash": tx_hash,
                 "initiation_time": start_time,
                 "completion_time": end_time,
@@ -142,14 +161,13 @@ def prepare_order_details_statistics(order_times):
     return sorted(result, key=lambda x: x["cloid"])
 
 
-def print_order_detailed_stats(ws_order_tester):
+def print_order_detailed_stats(order_details):
     # Print detailed order statistics
     print("\n--- Detailed Order Statistics ---")
     print(
         f"{'CLOID':<10} {'TX Hash':<12} {'Init(rel)':<10} {'Complete(rel)':<15} {'WS Event':<10} {'Duration':<10} {'WS Delay':<10} {'Total':<10}"
     )
     print("-" * 115)
-    order_details = ws_order_tester.get_order_details()
     start_reference = min([order["initiation_time"] for order in order_details]) if order_details else 0
     for order in order_details:
         # Normalize timestamps relative to the first order
@@ -162,9 +180,8 @@ def print_order_detailed_stats(ws_order_tester):
         )
 
 
-def print_ws_stats(ws_order_tester):
+def print_ws_stats(ws_stats):
     # Print WebSocket delay statistics
-    ws_stats = ws_order_tester.get_delay_statistics()
     if ws_stats:
         print("\n--- WebSocket Event Delay Statistics ---")
 
