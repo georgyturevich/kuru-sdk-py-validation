@@ -60,7 +60,8 @@ if [ -z "$ONLY_BLACK" ] && [ -z "$ONLY_ISORT" ]; then
   flake8 lib tests
 
   echo "Running pylint..."
-  pylint lib tests
+  pylint lib tests || pylint-exit -efail $?
+
 
   echo "Running mypy..."
   mypy lib tests

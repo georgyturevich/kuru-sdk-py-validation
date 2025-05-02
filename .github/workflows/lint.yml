@@ -49,7 +49,7 @@ jobs:
       id: pylint
       continue-on-error: true
       run: |
-        pylint lib tests
+        pylint lib tests || pylint-exit -efail $?
 
     - name: Type check with mypy
       id: mypy
