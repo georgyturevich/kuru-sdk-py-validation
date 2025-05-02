@@ -1,7 +1,4 @@
-from typing import Dict, Optional
-
 from kuru_sdk.client_order_executor import ClientOrderExecutor
-from web3 import AsyncWeb3
 
 from lib.utils.nonce_manager import NonceManager
 
