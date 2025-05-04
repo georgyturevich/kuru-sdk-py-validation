@@ -1,0 +1,93 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.13]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-kuru-sdk.txt
+
+    - name: Check formatting with Black
+      id: black
+      continue-on-error: true
+      run: |
+        black --check .
+
+    - name: Check imports with isort
+      id: isort
+      continue-on-error: true
+      run: |
+        isort --check --profile black .
+
+    - name: Lint with flake8
+      id: flake8
+      continue-on-error: true
+      run: |
+        flake8 lib tests
+
+    - name: Lint with pylint
+      id: pylint
+      continue-on-error: true
+      run: |
+        pylint lib tests || pylint-exit -efail $?
+
+    - name: Type check with mypy
+      id: mypy
+      continue-on-error: true
+      run: |
+        mypy lib tests
+
+    - name: Check if any linting step failed
+      run: |
+        FAILED=false
+
+        if [[ "${{ steps.black.outcome }}" == "failure" ]]; then
+          echo "Black formatting check failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.isort.outcome }}" == "failure" ]]; then
+          echo "Isort import check failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.flake8.outcome }}" == "failure" ]]; then
+          echo "Flake8 linting failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.pylint.outcome }}" == "failure" ]]; then
+          echo "Pylint linting failed"
+          FAILED=true
+        fi
+
+        if [[ "${{ steps.mypy.outcome }}" == "failure" ]]; then
+          echo "Mypy type checking failed"
+          FAILED=true
+        fi
+
+        if [[ "$FAILED" == "true" ]]; then
+          exit 1
+        else
+          echo "All linting steps passed"
+        fi
