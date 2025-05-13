@@ -69,7 +69,7 @@ async def test_single_orders_submission_and_cancelling(settings: Settings, rate_
     balance = await web3.eth.get_balance(client.wallet_address)
     log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
 
-    price = "0.00000284"
+    price = "0.00000201"
     size = "10000"
 
     num_orders = 20  # Increased from 1 to get more meaningful statistics
@@ -143,7 +143,7 @@ async def test_single_orders_submission_and_cancelling(settings: Settings, rate_
     ), "Incorrect number of WebSocket CancelOrder events received"
 
 
-async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, ws_order_tester=None):
+async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size, cloid, ws_order_tester = None):
     # Start time tracking for order initiation
     start_time = time.time()
 
@@ -162,11 +162,13 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
         price=price,
         size=size,
         post_only=False,
-        cloid=cloid,
+        #tick_normalization="round_up"
     )
     tx_options = TxOptions(nonce=nonce)
     log.info("Placing limit buy order", size=order.size, price=order.price, cloid=cloid)
-    tx_hash = await client.place_order(order, tx_options)
+    cloid = await client.place_order(order, tx_options)
+    # order.cloid = f"{tx_hash}_{order.side}_{price_str}"
+    tx_hash = cloid.split("_")[0]
 
     assert tx_hash is not None
     assert len(tx_hash) > 0
@@ -196,8 +198,8 @@ async def create_limit_buy_order(web3, client: ClientOrderExecutor, price, size,
     return {"cloid": cloid, "duration": duration}
 
 
-async def cancel_order(client: ClientOrderExecutor, order_id: int):
-    cloid = client.order_id_to_cloid[order_id]
+async def cancel_order(client: ClientOrderExecutor, order_id: int, cloid: str = None):
+    #cloid = client.order_id_to_cloid[order_id]
 
     log.info("Cancelling order ...", order_id=order_id, cloid=cloid)
 
@@ -206,7 +208,7 @@ async def cancel_order(client: ClientOrderExecutor, order_id: int):
     tx_options = TxOptions(nonce=nonce)
 
     start_time = time.time()
-    tx_hash = await client.cancel_orders(order_ids=[order_id], tx_options=tx_options)
+    tx_hash = await client.cancel_orders(market_address=client.market_address, order_ids=[order_id], tx_options=tx_options)
     end_time = time.time()
     duration = end_time - start_time
 
@@ -295,12 +297,12 @@ class WsOrderTester:
 
         try:
             log.info("WebSocket OrderCreated event received", payload=payload)
-            found = self.save_ws_event_order_created_timing_info(payload)
+            found, cloid = self.save_ws_event_order_created_timing_info(payload)
 
             if found:
 
                 assert self.client is not None
-                result = await cancel_order(self.client, payload.order_id)
+                result = await cancel_order(self.client, payload.order_id, cloid)
 
                 self.save_order_cancelled_timing_info(result)
 
@@ -333,11 +335,21 @@ class WsOrderTester:
             cancel_tx_hash=order_info.cancel_tx_hash,
         )
 
-    def save_ws_event_order_created_timing_info(self, payload: OrderCreatedPayload) -> bool:
+    def save_ws_event_order_created_timing_info(self, payload: OrderCreatedPayload) -> (bool, str | None):
         assert self.client is not None
-        cloid = self.client.order_id_to_cloid[payload.order_id]
+        
+        # remove 0x from transaction hash if exists
+        tx_hash = payload.transaction_hash[2:] if payload.transaction_hash.startswith("0x") else payload.transaction_hash
+
+        price_str = f"{payload.price:.16f}"
+        price_str = price_str.rstrip('0').rstrip('.') if '.' in price_str else price_str
+
+        (price_normalized, _) = self.client.orderbook.normalize_with_precision_and_tick(
+            price_str, 0
+        )
+
+        cloid = tx_hash + "_buy_" + str(price_normalized)
         receipt_time = time.time()
-        tx_hash = payload.transaction_hash
         # Normalize tx_hash by removing '0x' prefix if present
         if tx_hash.startswith("0x"):
             tx_hash = tx_hash[2:]
@@ -364,9 +376,9 @@ class WsOrderTester:
                 total_delay=f"{total_delay:.4f}",
             )
 
-            return True
+            return True, cloid
 
-        return False
+        return False, None
 
     async def on_order_cancelled(self, payload: OrderCancelledPayload):
         self.log.info("WebSocket OrderCancelled event received", payload=payload)

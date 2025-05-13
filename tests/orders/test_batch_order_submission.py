@@ -16,13 +16,11 @@ from web3 import AsyncHTTPProvider, AsyncWeb3
 
 from lib import constants
 from lib.client_extensions import get_next_nonce
+from lib.utils.price_change import price_suffix_change
 from tests.orders.helpers import (
     OrderTimingInfo,
     prepare_order_details_statistics,
     prepare_ws_delay_statistics,
-    print_cancel_order_stats,
-    print_order_detailed_stats,
-    print_ws_stats,
 )
 from tests.settings import Settings
 
@@ -46,32 +44,32 @@ async def test_batch_orders_submission_and_cancelling(settings: Settings, batch_
     )
     client.orderbook.set_market_params(await client.orderbook.fetch_market_params())
 
-    ws_order_tester = None
-    # ws_order_tester = WsOrderTester(
-    #     market_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
-    #     ws_url=settings.websocket_url,
-    #     rpc_url=settings.full_rpc_url(),
-    #     private_key=settings.private_key,
-    #     client=client,
-    # )
-    #
-    # try:
-    #     await ws_order_tester.initialize()
-    # except Exception as e:
-    #     log.error("Error initializing WebSocket tester", error=e)
-    #     log.exception(e)
-    #     assert False
+    ws_order_tester = WsOrderTester(
+        market_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
+        ws_url=settings.websocket_url,
+        rpc_url=settings.full_rpc_url(),
+        private_key=settings.private_key,
+        client=client,
+    )
+
+    try:
+        await ws_order_tester.initialize()
+    except Exception as e:
+        log.error("Error initializing WebSocket tester", error=e)
+        log.exception(e)
+        assert False
 
     balance = await web3.eth.get_balance(client.wallet_address)
     log.info("Wallet balance", balance=f"{web3.from_wei(balance, 'ether')} MON")
 
-    price = "0.00000284"
+    price = "0.00000201"
     size = "10000"
 
     num_orders = 5  # Total number of orders
     num_batches = math.ceil(num_orders / batch_size)  # Number of batches
 
-    await add_margin_balance(web3, price, size, num_orders, settings.private_key)
+    max_price = price_suffix_change(price, num_orders)
+    await add_margin_balance(web3, max_price, size, num_orders, settings.private_key)
 
     # Track total time for all batches
     start_time_total = time.time()
@@ -92,6 +90,7 @@ async def test_batch_orders_submission_and_cancelling(settings: Settings, batch_
         for i in range(start_order_index, end_order_index):
             cloid = f"batch_{batch_index}_{i}"
             cloids.append(cloid)
+            price = price_suffix_change(price, i)
             order_request = OrderRequest(
                 market_address=constants.testnet_market_addresses["TEST_CHOG_MON"],
                 order_type="limit",
@@ -99,7 +98,8 @@ async def test_batch_orders_submission_and_cancelling(settings: Settings, batch_
                 price=price,
                 size=size,
                 post_only=False,
-                cloid=cloid,
+                tick_normalization="round_up",
+                #cloid=cloid,
             )
             order_requests.append(order_request)
         
@@ -115,22 +115,22 @@ async def test_batch_orders_submission_and_cancelling(settings: Settings, batch_
         total_duration=f"{total_duration:.2f}",
     )
 
-    # # Wait for all WebSocket events to be received (with a timeout)
-    # log.info(
-    #     "Waiting for WebSocket events",
-    #     expected_events=ws_order_tester.expected_events,
-    #     received_events=ws_order_tester.received_order_create_ws_events,
-    # )
-    # try:
-    #     await asyncio.wait_for(ws_order_tester.all_create_events_received.wait(), timeout=60)
-    #     log.info("All WebSocket create events received",
-    #              event_count=ws_order_tester.received_order_create_ws_events)
-    # except asyncio.TimeoutError:
-    #     log.warning(
-    #         "Timeout waiting for WebSocket create events",
-    #         received=ws_order_tester.received_order_create_ws_events,
-    #         expected=ws_order_tester.expected_events,
-    #     )
+    # Wait for all WebSocket events to be received (with a timeout)
+    log.info(
+        "Waiting for WebSocket events",
+        expected_events=ws_order_tester.expected_events,
+        received_events=ws_order_tester.received_order_create_ws_events,
+    )
+    try:
+        await asyncio.wait_for(ws_order_tester.all_create_events_received.wait(), timeout=15)
+        log.info("All WebSocket create events received",
+                 event_count=ws_order_tester.received_order_create_ws_events)
+    except asyncio.TimeoutError:
+        log.warning(
+            "Timeout waiting for WebSocket create events",
+            received=ws_order_tester.received_order_create_ws_events,
+            expected=ws_order_tester.expected_events,
+        )
     #
     # # Now cancel orders in batches
     # log.info("Cancelling orders in batches")
@@ -199,10 +199,15 @@ async def create_batch_orders(web3, client: ClientOrderExecutor, orders: List[Or
     tx_options = TxOptions(nonce=nonce)
     
     # Place batch orders
-    tx_hash = await client.batch_orders(orders, tx_options)
+    cloids = await client.batch_orders(orders, tx_options)
 
+    assert cloids is not None
+    assert len(cloids) > 0
+
+    tx_hash = cloids[0].split("_")[0]
     assert tx_hash is not None
     assert len(tx_hash) > 0
+
     log.info("Batch order transaction sent", tx_hash=tx_hash, batch_index=batch_index)
 
     tx_receipt = await web3.eth.wait_for_transaction_receipt(HexStr(tx_hash), timeout=30)
@@ -219,8 +224,7 @@ async def create_batch_orders(web3, client: ClientOrderExecutor, orders: List[Or
     # Record transaction hash, cloids, start time, and end time for WebSocket delay tracking
     # if ws_order_tester is not None:
     #     for order in orders:
-    #         ws_order_tester.add_order_tx(tx_receipt["transactionHash"].hex(),
-    #                                     start_time, end_time, order.cloid)
+    #         ws_order_tester.add_order_tx(tx_receipt["transactionHash"].hex(), start_time, end_time, order.cloid)
 
     log.info(
         "Batch order placed successfully",
@@ -352,16 +356,17 @@ class WsOrderTester:
 
     async def on_order_created(self, payload: OrderCreatedPayload):
         if self.client is None or payload.owner != self.client.wallet_address:
+            log.warning("Order not from our client", payload=payload)
             return
 
         try:
             log.info("WebSocket OrderCreated event received", payload=payload)
-            found = self.save_ws_event_order_created_timing_info(payload)
-
-            if found:
-                self.received_order_create_ws_events += 1
-                if self.received_order_create_ws_events >= self.expected_events:
-                    self.all_create_events_received.set()
+            # found = self.save_ws_event_order_created_timing_info(payload)
+            #
+            # if found:
+            #     self.received_order_create_ws_events += 1
+            #     if self.received_order_create_ws_events >= self.expected_events:
+            #         self.all_create_events_received.set()
                 
         except Exception as e:
             log.error("Error processing on_order_created WebSocket event", error=str(e))
@@ -468,19 +473,12 @@ class WsOrderTester:
         if not hasattr(self.client.orderbook, 'market_params') or self.client.orderbook.market_params is None:
             self.client.orderbook.market_params = await self.client.orderbook.fetch_market_params()
         
-        # Convert async callback methods to sync callback functions
-        def on_order_created_sync(payload):
-            asyncio.create_task(self.on_order_created(payload))
-        
-        def on_order_cancelled_sync(payload):
-            asyncio.create_task(self.on_order_cancelled(payload))
-        
         self.ws_client = WebSocketHandler(
             websocket_url=self.ws_url,
             market_address=self.market_address,
             market_params=self.client.orderbook.market_params,
-            on_order_created=on_order_created_sync,
-            on_order_cancelled=on_order_cancelled_sync,
+            on_order_created=self.on_order_created,
+            on_order_cancelled=self.on_order_cancelled,
         )
 
         await self.ws_client.connect()
