@@ -38,6 +38,9 @@ async def test_compare_performance():
     fork_success = 0
     fork_failure = 0
     fork_times = {}
+    thread_success = 0
+    thread_failure = 0
+    thread_times = {}
 
     api = KuruAPI(url=os.getenv("KURU_API_URL"))
     api_fork = KuruAPIFork(url=os.getenv("KURU_API_URL"))
@@ -52,6 +55,11 @@ async def test_compare_performance():
     for i in range(n_runs):
         fork_tasks.append(get_user_orders_fork_sdk(api_fork))
 
+    # Create tasks for threading implementation
+    thread_tasks = []
+    for i in range(n_runs):
+        thread_tasks.append(get_user_order_orign_sdk__threading(api))
+
     # Measure total time for running both SDKs in parallel
     total_start_time = time.time()
 
@@ -64,6 +72,11 @@ async def test_compare_performance():
     fork_total_start_time = time.time()
     fork_results = await asyncio.gather(*fork_tasks, return_exceptions=True)
     fork_total_time = time.time() - fork_total_start_time
+
+    # Run threading implementation tasks with its own asyncio.gather
+    thread_total_start_time = time.time()
+    thread_results = await asyncio.gather(*thread_tasks, return_exceptions=True)
+    thread_total_time = time.time() - thread_total_start_time
 
     # Calculate total time for the entire test
     total_time = time.time() - total_start_time
@@ -86,14 +99,25 @@ async def test_compare_performance():
             fork_times[result["cloid"]] = result["duration"]
             fork_success += 1
 
-    logger.info(f"Total time for running both SDKs sequentially: {total_time:.4f}s")
+    # Process threading implementation results
+    for i, result in enumerate(thread_results):
+        if isinstance(result, Exception):
+            logger.error(f"Error in threading implementation run {i}: {result}")
+            thread_failure += 1
+        else:
+            thread_times[result["cloid"]] = result["duration"]
+            thread_success += 1
+
+    logger.info(f"Total time for running all implementations sequentially: {total_time:.4f}s")
 
     # Calculate statistics
     orig_durations = list(orig_times.values())
     fork_durations = list(fork_times.values())
+    thread_durations = list(thread_times.values())
 
-    await print_durations_summary(fork_durations, fork_failure, fork_success, fork_total_time, n_runs, orig_durations,
-                                  orig_failure, orig_success, orig_total_time)
+    await print_durations_summary(fork_durations, fork_failure, fork_success, fork_total_time, 
+                                  thread_durations, thread_failure, thread_success, thread_total_time,
+                                  n_runs, orig_durations, orig_failure, orig_success, orig_total_time)
 
 
 async def get_user_orders_fork_sdk(api_fork: KuruAPIFork):
@@ -121,10 +145,42 @@ async def get_user_order_orign_sdk(api: KuruAPI):
     # Return timing information in the format expected by run_tasks_in_parallel
     return {"cloid": f"orig_{time.time()}", "duration": duration}
 
+async def get_user_order_orign_sdk__threading(api: KuruAPI):
 
+    # Create a Future object that will be set when the thread completes
+    loop = asyncio.get_event_loop()
+    future = loop.create_future()
 
-async def print_durations_summary(fork_durations, fork_failure, fork_success, fork_total_time, n_runs, orig_durations,
-                                  orig_failure, orig_success, orig_total_time):
+    def thread_function():
+        try:
+            c = increment_counter_with_lock()
+            logger.info(f"Running {c} request with orig SDK...")
+
+            start_time = time.time()
+            # Call the synchronous API method in the thread
+            orders_response = api.get_user_orders(os.getenv("USER_ADDRESS"), limit=3)
+            duration = time.time() - start_time
+            logger.info(f"Completed {c} request with orig SDK")
+            assert len(orders_response) > 0
+            # Set the Future's result with the timing information
+            loop.call_soon_threadsafe(
+                future.set_result,
+                {"cloid": f"orig_{time.time()}", "duration": duration}
+            )
+        except Exception as e:
+            # If there's an error, set the Future's exception
+            loop.call_soon_threadsafe(future.set_exception, e)
+
+    # Create and start the thread as daemon so it doesn't block program exit
+    thread = threading.Thread(target=thread_function, daemon=True)
+    thread.start()
+
+    # Wait for the future to be resolved
+    return await future
+
+async def print_durations_summary(fork_durations, fork_failure, fork_success, fork_total_time, 
+                                  thread_durations, thread_failure, thread_success, thread_total_time,
+                                  n_runs, orig_durations, orig_failure, orig_success, orig_total_time):
     logger.info("===== PERFORMANCE COMPARISON =====")
     logger.info(f"Original SDK - Successful runs: {orig_success}, Failed runs: {orig_failure}")
     logger.info(f"  Total time for all {n_runs} runs: {orig_total_time:.4f}s")
@@ -144,4 +200,13 @@ async def print_durations_summary(fork_durations, fork_failure, fork_success, fo
         logger.info(f"  Median time per run: {statistics.median(fork_durations):.4f}s")
         if len(fork_durations) > 1:
             logger.info(f"  Std dev: {statistics.stdev(fork_durations):.4f}s")
+    logger.info(f"Original SDK threading Implementation - Successful runs: {thread_success}, Failed runs: {thread_failure}")
+    logger.info(f"  Total time for all {n_runs} runs: {thread_total_time:.4f}s")
+    if thread_durations:
+        logger.info(f"  Min time per run: {min(thread_durations):.4f}s")
+        logger.info(f"  Max time per run: {max(thread_durations):.4f}s")
+        logger.info(f"  Avg time per run: {statistics.mean(thread_durations):.4f}s")
+        logger.info(f"  Median time per run: {statistics.median(thread_durations):.4f}s")
+        if len(thread_durations) > 1:
+            logger.info(f"  Std dev: {statistics.stdev(thread_durations):.4f}s")
     logger.info("=================================")
