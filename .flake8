@@ -1,0 +1,20 @@
+[flake8]
+max-line-length = 120
+exclude = .git,__pycache__,venv,build,dist
+ignore = 
+    # E203: whitespace before ':'
+    E203,
+    # E231: missing whitespace after ','
+    E231,
+    # E501: line too long
+    E501,
+    # W503: line break before binary operator
+    W503,
+    # F403: 'from module import *' used
+    F403,
+    # F405: name may be undefined, or defined from star imports
+    F405
+per-file-ignores =
+    # F401: imported but unused
+    __init__.py: F401
+max-complexity = 12

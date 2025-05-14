@@ -1,0 +1,3 @@
+rpc_url: "https://attentive-wider-arm.monad-testnet.quiknode.pro"
+websocket_url: "wss://ws.testnet.kuru.io"
+api_url: "https://api.testnet.kuru.io/api/v2"
