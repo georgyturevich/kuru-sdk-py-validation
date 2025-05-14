@@ -13,7 +13,7 @@ from lib.constants import testnet_market_addresses
 async def test_get_user_orders():
     load_dotenv()
     api = KuruAPI.KuruAPI(url=os.getenv("KURU_API_URL"))
-    orders_response = api.get_user_orders(os.getenv("USER_ADDRESS"))
+    orders_response = api.get_user_orders(os.getenv("USER_ADDRESS"), limit=3)
     assert len(orders_response) > 0
 
     print(f"\nUser order: {orders_response}")
@@ -39,7 +39,7 @@ async def test_get_active_orders():
     load_dotenv()
 
     api = KuruAPI.KuruAPI(url=os.getenv("KURU_API_URL"))
-    orders_response = api.get_active_orders(os.getenv("USER_ADDRESS"))
+    orders_response = api.get_active_orders(os.getenv("USER_ADDRESS"), limit=3)
     assert len(orders_response) > 0
 
     print(f"\nActive orders: {orders_response}")

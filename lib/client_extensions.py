@@ -1,4 +1,5 @@
 from kuru_sdk.client_order_executor import ClientOrderExecutor
+from web3 import AsyncWeb3, AsyncHTTPProvider
 
 from lib.utils.nonce_manager import NonceManager
 
@@ -16,8 +17,14 @@ def add_nonce_manager_to_client(client: ClientOrderExecutor) -> NonceManager:
     """
     # Use hasattr to check if nonce_manager already exists on the client instance
     if not hasattr(client, "_nonce_manager"):
+        web3 = client.web3
+        if not isinstance(web3, AsyncWeb3):
+            if hasattr(web3, 'provider') and hasattr(web3.provider, 'endpoint_uri'):
+                endpoint = web3.provider.endpoint_uri
+                web3 = AsyncWeb3(AsyncHTTPProvider(endpoint))
+
         # Attach a nonce manager to the client as a private attribute
-        client._nonce_manager = NonceManager(client.web3, client.wallet_address)
+        client._nonce_manager = NonceManager(web3, client.wallet_address)
 
     return client._nonce_manager
 
